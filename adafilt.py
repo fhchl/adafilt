@@ -20,10 +20,10 @@ class AdaptiveFilter:
     def __init__(self):
         raise NotImplementedError
 
-    def adapt(self, x, d):
+    def adapt(self, x, e):
         raise NotImplementedError
 
-    def predict(self, x):
+    def filt(self, x):
         raise NotImplementedError
 
     def run(self, x, d):
@@ -44,7 +44,7 @@ class AdaptiveFilter:
         y = np.zeros(N)  # filtered output signal
 
         for n in range(N):
-            y[n] = self.predict(x[n])
+            y[n] = self.filt(x[n])
             e[n] = d[n] - y[n]
             w[n] = self.adapt(x[n], e[n])
 
@@ -63,7 +63,6 @@ class AdaptiveFilter:
         """
         # filtered reference signal
         fx = np.convolve(x, sec_path_coeff_est)
-        #fx = extend_to_length(fx, len(d))
 
         N = x.shape[0]
         w = np.zeros((N, self.L))  # filter history
@@ -75,8 +74,10 @@ class AdaptiveFilter:
         fx = blockwise_input_form(fx, self.L)
 
         for n in range(N):
-            y[n] = self.predict(x[n])
-            yblocks = blockwise_input_form(y, len(sec_path_coeff))  # TODO: use simple indexing
+            y[n] = self.filt(x[n])
+            yblocks = blockwise_input_form(
+                y, len(sec_path_coeff)
+            )  # TODO: use simple indexing
             u[n] = np.dot(sec_path_coeff, yblocks[n])
             e[n] = d[n] - u[n]
             w[n] = self.adapt(fx[n], e[n])
@@ -85,27 +86,98 @@ class AdaptiveFilter:
 
 
 class LMSFilter(AdaptiveFilter):
-    def __init__(self, order, mu=0.1, leak=0, w=None):
+    def __init__(self, order, mu=0.1, leak=0, w_init=None, normalized=True):
         assert 0 <= leak and leak < 1 / mu
 
         self.L = order
         self.mu = mu
         self.leak = leak
         self.w = np.zeros(order)
-        if w is not None:
-            self.w[:] = w
+        self.normalized = normalized
+        if w_init is not None:
+            self.w[:] = w_init
 
-    def predict(self, x):
+    def filt(self, x):
         y = np.dot(self.w, x)
         return y
 
     def adapt(self, x, e):
-        self.w = (1 - self.mu * self.leak) * self.w + self.mu * x * np.conj(e)
+        if self.normalized:
+            mu = self.mu / (np.dot(x, x) + 1e-5)
+        else:
+            mu = self.mu
+        self.w = (1 - mu * self.leak) * self.w + mu * x * np.conj(e)
         return self.w
 
 
-class NLMSFilter(LMSFilter):
+class BlockAdaptiveFilter(AdaptiveFilter):
+    def run(self, x, d):
+        """
+        Parameters
+        ----------
+
+        x : array (N,)
+            Reference signal
+        d : array (M,)
+            Desired signal, M>=N
+
+        """
+        x = np.atleast_1d(x)
+        d = np.atleast_1d(d)
+        assert x.ndim == 1
+        assert x.shape[0] % self.blocksize == 0
+        assert x.shape == d.shape
+
+        x = x.reshape((-1, self.blocksize))
+        d = d.reshape((-1, self.blocksize))
+
+        N = x.shape[0]
+        w = np.zeros((N, 2 * self.blocksize))  # filter history
+        e = np.zeros((N, self.blocksize))  # error signal
+        y = np.zeros((N, self.blocksize))  # filtered output signal
+
+        for n in range(N):
+            y[n] = self.filt(x[n])
+            e[n] = d[n] - y[n]
+            W = self.adapt(x[n], e[n])
+            w[n] = np.real(np.fft.ifft(W))
+
+        return y.flatten(), e.flatten(), w
+
+
+class FastBlockLMSFilter(BlockAdaptiveFilter):
+    """Fast Block LMS filter based on overlap-save sectioning."""
+
+    def __init__(self, blocksize, mu=0.1, forget=0.1, leak=0, eps=1e-5):
+        self.W = np.zeros(2 * blocksize, dtype=complex)
+        self.mu = mu
+        self.last_x = np.zeros(blocksize)
+        self.forget = forget
+        self.P = 0
+        self.eps = eps
+        self.blocksize = blocksize
+        self.leak = 0
+
+    def filt(self, x):
+        assert len(x) == self.blocksize
+
+        self.X = np.fft.fft(np.concatenate((self.last_x, x)))
+        self.last_x = x
+        y = np.real(np.fft.ifft(np.diag(self.X) @ self.W)[self.blocksize :])
+        return y
+
     def adapt(self, x, e):
-        mu_norm = self.mu / (np.dot(x, x) + 1e-5)
-        self.w = (1 - mu_norm * self.leak) * self.w + mu_norm * x * np.conj(e)
-        return self.w
+        assert len(x) == self.blocksize
+        assert len(e) == self.blocksize
+
+        # signal power estimation
+        self.P = self.forget * self.P + (1 - self.forget) * np.abs(self.X) ** 2
+        D = 1 / (self.P + self.eps)
+
+        # tap weight adaptation
+        E = np.fft.fft(np.concatenate((np.zeros(self.blocksize), e)))
+        Phi = np.fft.ifft(D * self.X.conj() * E)[: self.blocksize]
+        self.W = (1 - self.mu * self.leak) * self.W + self.mu * np.fft.fft(
+            np.concatenate((Phi, np.zeros(self.blocksize)))
+        )
+        return self.W
