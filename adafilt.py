@@ -1,10 +1,58 @@
 """
 TODO: use olafilt From https://github.com/jthiem/overlapadd instead lfilter.
+TODO: alternative to slow ring buffers?
 """
 
 import numpy as np
 from scipy.signal import lfilter
 from collections import deque
+
+
+class FakeInterface:
+    """A fake audio interace."""
+
+    def __init__(
+        self, buffsize, signal, h_pri=[1], h_sec=[1], noise=lambda x: x, y_init=None
+    ):
+        self.buffsize = buffsize
+        self.orig_signal = signal
+        self.signal = iter(signal.reshape(-1, buffsize))
+        self.noise = noise
+        self.h_pri = h_pri
+        self.h_sec = h_sec
+        self.zi_pri = np.zeros(len(h_pri) - 1)
+        self.zi_sec = np.zeros(len(h_sec) - 1)
+
+    def rec(self):
+        return self.playrec(np.zeros(self.buffsize))
+
+    def playrec(self, y, send_signal=True):
+        # TODO: make mute signal kwarg of this func
+        y = np.atleast_1d(y)
+
+        if send_signal:
+            x = np.atleast_1d(next(self.signal))  # reference signal
+        else:
+            x = np.zeros(self.buffsize)
+
+        d, self.zi_pri = lfilter(
+            self.h_pri, 1, x, zi=self.zi_pri
+        )  # primary path signal at error mic
+        u, self.zi_sec = lfilter(
+            self.h_sec, 1, y, zi=self.zi_sec
+        )  # secondary path signal at error mic
+        d = self.noise(d)
+
+        # NOTE: should this be plus?
+        e = d - u  # error signal
+
+        return x, e, u, d
+
+    def reset(self):
+        """Reset simulation to inital condition."""
+        self.signal = iter(self.orig_signal.reshape(-1, self.buffsize))
+        self.zi_pri = np.zeros(len(self.h_pri) - 1)
+        self.zi_sec = np.zeros(len(self.h_sec) - 1)
 
 
 def blockwise_input_form(arr, blocksize):
@@ -27,6 +75,11 @@ class AdaptiveFilter:
 
     def filt(self, x):
         raise NotImplementedError
+
+    def reset(self):
+        self.w = np.zeros(self.filtsize)
+        self.xbuff = deque(np.zeros(self.filtsize), maxlen=self.filtsize)
+        self.fxbuff = deque(np.zeros(self.filtsize), maxlen=self.filtsize)
 
     def run(self, x, d):
         """
@@ -86,11 +139,57 @@ class AdaptiveFilter:
 
         return y, u, e, w
 
+    def adafilt(self, x, e, fx=None):
+        """Summary
+
+        Parameters
+        ----------
+        x : (N,) array_like
+            Reference signal.
+        e : (N,) array_like
+            Error signal.
+        fx : (N,) array_like or None, optional
+            Filtered reference signal.
+
+        Returns
+        -------
+        y: (N,) ndarray
+            Filter output.
+        """
+        x = np.asarray(x)
+        assert x.ndim == 1
+        assert x.shape == e.shape
+        if fx is not None:
+            assert x.shape == fx.shape
+        assert len(x) % self.blocksize == 0
+
+        nblocks = int(len(x) / self.blocksize)
+
+        y = np.zeros(len(x))
+        M = self.blocksize
+        for n in range(nblocks):
+            slce = slice(n * M, (n + 1) * M)
+
+            self.xbuff.extend(x[slce])
+
+            # TODO: this works for LMS but not for BlockLMS
+
+            if fx is not None:
+                self.fxbuff.extend(fx[slce])
+                self.adapt(self.fxbuff, e[slce])
+            else:
+                self.adapt(self.xbuff, e[slce])
+
+            # filter
+            y[n * M : (n + 1) * M] = self.filt(self.xbuff)
+
+        return y
+
 
 class LMSFilter(AdaptiveFilter):
     def __init__(self, filtsize, mu=0.1, leak=0, w_init=None, normalized=True):
         assert 0 <= leak and leak < 1 / mu
-
+        self.blocksize = 1
         self.filtsize = filtsize
         self.mu = mu
         self.leak = leak
@@ -100,8 +199,11 @@ class LMSFilter(AdaptiveFilter):
         if w_init is not None:
             self.w[:] = w_init
 
+        self.xbuff = deque(np.zeros(filtsize), maxlen=filtsize)
+        self.fxbuff = deque(np.zeros(filtsize), maxlen=filtsize)
+
     def filt(self, x):
-        x = np.asarray(x)
+        x = np.asarray(x)[::-1]  # reverse order for convolution
         assert x.ndim == 1
         assert x.size == self.filtsize
 
@@ -109,7 +211,7 @@ class LMSFilter(AdaptiveFilter):
         return y
 
     def adapt(self, x, e):
-        x = np.asarray(x)
+        x = np.asarray(x)[::-1]  # reverse order for convolution
         assert x.ndim == 1
         assert x.size == self.filtsize
 
@@ -124,7 +226,72 @@ class LMSFilter(AdaptiveFilter):
         return self.w
 
 
-class BlockAdaptiveFilter(AdaptiveFilter):
+class FastBlockLMSFilter(AdaptiveFilter):
+    """Fast Block LMS filter based on overlap-save sectioning."""
+
+    def __init__(
+        self,
+        blocksize,
+        filtsize=None,
+        mu=0.1,
+        forget=0.1,
+        leak=0,
+        w_init=None,
+        eps=1e-5,
+        constrained=True,
+    ):
+        self.blocksize = blocksize
+        self.mu = mu
+        self.forget = forget
+        self.constrained = constrained
+        self.P = 0
+        self.leak = 0
+        self.eps = eps
+        if filtsize is None:
+            filtsize = blocksize
+        self.W = np.zeros(2 * filtsize, dtype=complex)
+        if w_init:
+            self.W[:] = np.fft.fft(w_init)
+        self.filtsize = filtsize
+        self.last_x = np.zeros(filtsize)
+        self.xbuff = deque(np.zeros(filtsize), maxlen=filtsize)
+        self.fxbuff = deque(np.zeros(filtsize), maxlen=filtsize)
+
+    def reset(self):
+        self.W = np.zeros(2 * self.filtsize, dtype=complex)
+        super().reset()
+
+    def filt(self, x):
+        # TODO: only compute once per filt adapt cycle
+        self.X = np.fft.fft(np.concatenate((self.last_x, x)))
+        self.last_x = x
+        y = np.real(np.fft.ifft(self.X * self.W)[self.filtsize :])
+        return y
+
+    def adapt(self, x, e):
+        assert len(x) == self.filtsize
+        assert len(e) == self.filtsize
+
+        # TODO: only compute once per filt adapt cycle
+        self.X = np.fft.fft(np.concatenate((self.last_x, x)))
+
+        # signal power estimation
+        self.P = self.forget * self.P + (1 - self.forget) * np.abs(self.X) ** 2
+        D = 1 / (self.P + self.eps)
+
+        # tap weight adaptation
+        E = np.fft.fft(np.concatenate((np.zeros(self.filtsize), e)))
+        self.W *= 1 - self.mu * self.leak
+        if self.constrained:
+            Phi = np.fft.ifft(D * self.X.conj() * E)[: self.filtsize]
+            self.W += self.mu * np.fft.fft(
+                np.concatenate((Phi, np.zeros(self.filtsize)))
+            )
+        else:
+            self.W += self.mu * D * self.X.conj() * E
+
+        return self.W
+
     def run(self, x, d):
         """
         Parameters
@@ -196,67 +363,3 @@ class BlockAdaptiveFilter(AdaptiveFilter):
             w[n] = np.real(np.fft.ifft(W))
 
         return y.flatten(), u.flatten(), e.flatten(), w
-
-
-class FastBlockLMSFilter(BlockAdaptiveFilter):
-    """Fast Block LMS filter based on overlap-save sectioning."""
-
-    def __init__(
-        self,
-        blocksize,
-        mu=0.1,
-        forget=0.1,
-        leak=0,
-        w_init=None,
-        eps=1e-5,
-        constrained=True,
-    ):
-        self.blocksize = blocksize
-        self.mu = mu
-        self.forget = forget
-        self.constrained = constrained
-        self.P = 0
-        self.leak = 0
-        self.last_x = np.zeros(blocksize)
-        self.eps = eps
-        self.W = np.zeros(2 * blocksize, dtype=complex)
-        if w_init:
-            self.W[:] = np.fft.fft(w_init)
-
-    def filt(self, x):
-        # TODO: only compute once per filt adapt cycle
-        self.X = np.fft.fft(np.concatenate((self.last_x, x)))
-        self.last_x = x
-        y = np.real(np.fft.ifft(self.X * self.W)[self.blocksize :])
-        return y
-
-    def filt(self, x):
-        # TODO: only compute once per filt adapt cycle
-        self.X = np.fft.fft(np.concatenate((self.last_x, x)))
-        self.last_x = x
-        y = np.real(np.fft.ifft(self.X * self.W)[self.blocksize :])
-        return y
-
-    def adapt(self, x, e):
-        assert len(x) == self.blocksize
-        assert len(e) == self.blocksize
-
-        # TODO: only compute once per filt adapt cycle
-        self.X = np.fft.fft(np.concatenate((self.last_x, x)))
-
-        # signal power estimation
-        self.P = self.forget * self.P + (1 - self.forget) * np.abs(self.X) ** 2
-        D = 1 / (self.P + self.eps)
-
-        # tap weight adaptation
-        E = np.fft.fft(np.concatenate((np.zeros(self.blocksize), e)))
-        self.W *= 1 - self.mu * self.leak
-        if self.constrained:
-            Phi = np.fft.ifft(D * self.X.conj() * E)[: self.blocksize]
-            self.W += self.mu * np.fft.fft(
-                np.concatenate((Phi, np.zeros(self.blocksize)))
-            )
-        else:
-            self.W += self.mu * D * self.X.conj() * E
-
-        return self.W
