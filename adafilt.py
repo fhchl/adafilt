@@ -79,7 +79,7 @@ class AdaptiveFilter:
     def reset(self):
         self.w = np.zeros(self.filtsize)
         self.xbuff = deque(np.zeros(self.filtsize), maxlen=self.filtsize)
-        self.fxbuff = deque(np.zeros(self.filtsize), maxlen=self.filtsize)
+        self.zifilt = np.zeros(self.filtsize - 1)
 
     def run(self, x, d):
         """
@@ -92,7 +92,9 @@ class AdaptiveFilter:
             Desired signal, M>=N
 
         """
-        x = blockwise_input_form(x, self.filtsize)
+        x = np.asarray(x)
+        d = np.asarray(d)
+
         N = x.shape[0]
         w = np.zeros((N, self.filtsize))  # filter history
         e = np.zeros(N)  # error signal
@@ -140,7 +142,7 @@ class AdaptiveFilter:
         return y, u, e, w
 
     def adafilt(self, x, e, fx=None):
-        """Summary
+        """Adaptively filter x according to e and fx.
 
         Parameters
         ----------
@@ -157,10 +159,13 @@ class AdaptiveFilter:
             Filter output.
         """
         x = np.asarray(x)
+        e = np.asarray(e)
         assert x.ndim == 1
         assert x.shape == e.shape
         if fx is not None:
+            fx = np.asarray(fx)
             assert x.shape == fx.shape
+
         assert len(x) % self.blocksize == 0
 
         nblocks = int(len(x) / self.blocksize)
@@ -170,18 +175,13 @@ class AdaptiveFilter:
         for n in range(nblocks):
             slce = slice(n * M, (n + 1) * M)
 
-            self.xbuff.extend(x[slce])
-
-            # TODO: this works for LMS but not for BlockLMS
-
             if fx is not None:
-                self.fxbuff.extend(fx[slce])
-                self.adapt(self.fxbuff, e[slce])
+                self.adapt(fx[slce], e[slce])
             else:
-                self.adapt(self.xbuff, e[slce])
+                self.adapt(x[slce], e[slce])
 
             # filter
-            y[n * M : (n + 1) * M] = self.filt(self.xbuff)
+            y[n * M : (n + 1) * M] = self.filt(x[slce])
 
         return y
 
@@ -199,31 +199,64 @@ class LMSFilter(AdaptiveFilter):
         if w_init is not None:
             self.w[:] = w_init
 
+        self.zifilt = np.zeros(filtsize - 1)
         self.xbuff = deque(np.zeros(filtsize), maxlen=filtsize)
+        self.ebuff = deque(np.zeros(filtsize), maxlen=filtsize)
         self.fxbuff = deque(np.zeros(filtsize), maxlen=filtsize)
 
-    def filt(self, x):
-        x = np.asarray(x)[::-1]  # reverse order for convolution
-        assert x.ndim == 1
-        assert x.size == self.filtsize
+    def filt2(self, x):
+        """Filter x.
 
-        y = np.dot(self.w, x)
+        Parameters
+        ----------
+        x : (N,) array_like
+            Signal.
+
+        Returns
+        -------
+        y : (N, array_like)
+            Filtered signal.
+        """
+        x = np.atleast_1d(x)
+        y, self.zifilt = lfilter(self.w, 1, x, zi=self.zifilt)
+        return y.squeeze()  # return single number if input was single number
+
+    def filt(self, x):
+        assert isinstance(x, float)
+        self.xbuff.appendleft(x)
+        y = np.dot(self.w, self.xbuff)
         return y
 
     def adapt(self, x, e):
-        x = np.asarray(x)[::-1]  # reverse order for convolution
-        assert x.ndim == 1
-        assert x.size == self.filtsize
+        """Adapt filter coefficients.
+
+        Parameters
+        ----------
+        x : (blocksize,) array_like
+            Reference signal.
+        e : (blocksize,) array_like
+            Error signal
+        """
+        x = np.atleast_1d(x)
+        e = np.atleast_1d(e)
+
+        assert len(x) == self.blocksize
+        assert len(e) == self.blocksize
 
         if self.lock:
-            return self.w
+            return
 
-        if self.normalized:
-            mu = self.mu / (np.dot(x, x) + 1e-5)
-        else:
-            mu = self.mu
-        self.w = (1 - mu * self.leak) * self.w + mu * x * np.conj(e)
-        return self.w
+        N = len(x)
+        for n in range(N):
+            self.xbuff.appendleft(x[n])
+            xvec = np.array(self.xbuff)
+
+            if self.normalized:
+                mu = self.mu / (np.dot(xvec, xvec) + 1e-5)
+            else:
+                mu = self.mu
+
+            self.w = (1 - mu * self.leak) * self.w + mu * xvec * np.conj(e[n])
 
 
 class FastBlockLMSFilter(AdaptiveFilter):
