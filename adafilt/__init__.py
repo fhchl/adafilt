@@ -1,57 +1,8 @@
-"""
-TODO: use olafilt From https://github.com/jthiem/overlapadd instead lfilter.
-"""
-from collections import deque
-from itertools import cycle
+"""Adaptive filtering classes."""
 
 import numpy as np
-from scipy.signal import lfilter
-
-
-class FakeInterface:
-    """A fake audio interface."""
-
-    def __init__(
-        self, buffsize, signal, h_pri=[1], h_sec=[1], noise=lambda x: x, y_init=None
-    ):
-        self.buffsize = buffsize
-        self.orig_signal = signal
-        self.signal = cycle(signal.reshape(-1, buffsize))
-        self.noise = noise
-        self.h_pri = h_pri
-        self.h_sec = h_sec
-        self.zi_pri = np.zeros(len(h_pri) - 1)
-        self.zi_sec = np.zeros(len(h_sec) - 1)
-
-    def rec(self):
-        return self.playrec(np.zeros(self.buffsize))
-
-    def playrec(self, y, send_signal=True):
-        y = np.atleast_1d(y)
-
-        if send_signal:
-            x = np.atleast_1d(next(self.signal))  # reference signal
-        else:
-            x = np.zeros(self.buffsize)
-
-        d, self.zi_pri = lfilter(
-            self.h_pri, 1, x, zi=self.zi_pri
-        )  # primary path signal at error mic
-        u, self.zi_sec = lfilter(
-            self.h_sec, 1, y, zi=self.zi_sec
-        )  # secondary path signal at error mic
-        d = self.noise(d)
-
-        # NOTE: should this be plus?
-        e = d - u  # error signal
-
-        return x, e, u, d
-
-    def reset(self):
-        """Reset filter to initial condition."""
-        self.signal = cycle(self.orig_signal.reshape(-1, self.buffsize))
-        self.zi_pri = np.zeros(len(self.h_pri) - 1)
-        self.zi_sec = np.zeros(len(self.h_sec) - 1)
+from collections import deque
+from adafilt.utils import lfilter
 
 
 class AdaptiveFilter:

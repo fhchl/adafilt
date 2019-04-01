@@ -19,6 +19,15 @@ EMAIL = "franz.heuchel@gmail.com"
 AUTHOR = "Franz M. Heuchel"
 REQUIRES_PYTHON = ">=3.6.0"
 VERSION = "0.0.1"
+CLASSIFIERS = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Topic :: Scientific/Engineering"
+    "Topic :: Multimedia :: Sound/Audio",
+]
 
 # What packages are required for this module to be executed?
 REQUIRED = ["numpy"]
@@ -80,18 +89,11 @@ setup(
     author_email=EMAIL,
     python_requires=REQUIRES_PYTHON,
     url=URL,
-    py_modules=["response"],
+    # py_modules=["response"],
+    packages=["adafilt"],
     install_requires=REQUIRED,
     include_package_data=True,
     license="MIT",
-    classifiers=[
-        "License :: OSI Approved :: MIT License",
-        "Programming Language :: Python",
-        "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.6",
-        "Programming Language :: Python :: 3.7",
-        "Topic :: Multimedia :: Sound/Audio",
-        "Topic :: Utilities",
-    ],
+    classifiers=CLASSIFIERS,
     cmdclass={"upload": UploadCommand},
 )
