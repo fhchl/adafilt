@@ -1,22 +1,22 @@
 """
 TODO: use olafilt From https://github.com/jthiem/overlapadd instead lfilter.
-TODO: alternative to slow ring buffers?
 """
+from collections import deque
+from itertools import cycle
 
 import numpy as np
 from scipy.signal import lfilter
-from collections import deque
 
 
 class FakeInterface:
-    """A fake audio interace."""
+    """A fake audio interface."""
 
     def __init__(
         self, buffsize, signal, h_pri=[1], h_sec=[1], noise=lambda x: x, y_init=None
     ):
         self.buffsize = buffsize
         self.orig_signal = signal
-        self.signal = iter(signal.reshape(-1, buffsize))
+        self.signal = cycle(signal.reshape(-1, buffsize))
         self.noise = noise
         self.h_pri = h_pri
         self.h_sec = h_sec
@@ -27,7 +27,6 @@ class FakeInterface:
         return self.playrec(np.zeros(self.buffsize))
 
     def playrec(self, y, send_signal=True):
-        # TODO: make mute signal kwarg of this func
         y = np.atleast_1d(y)
 
         if send_signal:
@@ -49,350 +48,329 @@ class FakeInterface:
         return x, e, u, d
 
     def reset(self):
-        """Reset simulation to inital condition."""
-        self.signal = iter(self.orig_signal.reshape(-1, self.buffsize))
+        """Reset filter to initial condition."""
+        self.signal = cycle(self.orig_signal.reshape(-1, self.buffsize))
         self.zi_pri = np.zeros(len(self.h_pri) - 1)
         self.zi_sec = np.zeros(len(self.h_sec) - 1)
 
 
-def blockwise_input_form(arr, blocksize):
-    arr = np.concatenate((np.zeros(blocksize - 1), arr))
-    out = np.lib.stride_tricks.as_strided(
-        arr,
-        shape=(arr.shape[0] - blocksize + 1, blocksize),
-        strides=(arr.strides[0], arr.strides[0]),
-        writeable=False,
-    )
-    return np.fliplr(out)
-
-
 class AdaptiveFilter:
+    """Base class for adaptive filters."""
+
     def __init__(self):
         raise NotImplementedError
 
-    def adapt(self, x, e):
+    def reset(self):
+        """Reset filter object."""
         raise NotImplementedError
 
     def filt(self, x):
+        """Filter a block."""
         raise NotImplementedError
 
-    def reset(self):
-        self.w = np.zeros(self.filtsize)
-        self.xbuff = deque(np.zeros(self.filtsize), maxlen=self.filtsize)
-        self.zifilt = np.zeros(self.filtsize - 1)
+    def adapt(self, x, e):
+        """Adapt to a block."""
+        raise NotImplementedError
 
-    def run(self, x, d):
-        """
-        Parameters
-        ----------
-
-        x : array (N,)
-            Reference signal
-        d : array (M,)
-            Desired signal, M>=N
-
-        """
-        x = np.asarray(x)
-        d = np.asarray(d)
-
-        N = x.shape[0]
-        w = np.zeros((N, self.filtsize))  # filter history
-        e = np.zeros(N)  # error signal
-        y = np.zeros(N)  # filtered output signal
-
-        for n in range(N):
-            y[n] = self.filt(x[n])
-            e[n] = d[n] - y[n]
-            w[n] = self.adapt(x[n], e[n])
-
-        return y, e, w
-
-    def run_filtered_reference(self, x, d, sec_path_coeff, sec_path_coeff_est):
-        """
-        Parameters
-        ----------
-
-        x : array (N,)
-            Reference signal
-        d : array (M,)
-            Desired signal, M>=N
-
-        """
-        # filtered reference signal
-        fx = np.convolve(x, sec_path_coeff_est)
-
-        N = x.shape[0]
-        w = np.zeros((N + 1, self.filtsize))  # filter history
-        e = np.zeros(N)  # error signal
-        y = np.zeros(N)  # filtered output signal
-        u = np.zeros(N)  # control signal at error mic
-
-        x = blockwise_input_form(x, self.filtsize)
-        fx = blockwise_input_form(fx, self.filtsize)
-
-        for n in range(N):
-            y[n] = self.filt(x[n])
-            yblocks = blockwise_input_form(
-                y, len(sec_path_coeff)
-            )  # TODO: use simple indexing
-            u[n] = np.dot(sec_path_coeff, yblocks[n])
-            e[n] = d[n] - u[n]
-            w[n + 1] = self.adapt(fx[n], e[n])
-
-        return y, u, e, w
-
-    def adafilt(self, x, e, fx=None):
-        """Adaptively filter x according to e and fx.
+    def __call__(self, x, d, sec_path_coeff=None, sec_path_est=None):
+        """Compute filter output, error, and coefficients.
 
         Parameters
         ----------
         x : (N,) array_like
-            Reference signal.
-        e : (N,) array_like
-            Error signal.
-        fx : (N,) array_like or None, optional
-            Filtered reference signal.
+            Reference signal. `N` must be divisable by filter blocklength.
+        d : (N,) array_like
+            Desired signal. `N` must be divisable by filter blocklength.
+        sec_path_coeff : array_like or None, optional
+            Coefficients of the secondary path filter model.
+        sec_path_est : None, optional
+            Estimate of secondary path filter model.
 
         Returns
         -------
-        y: (N,) ndarray
+        y : (N,) numpy.ndarray
             Filter output.
+        u : (N,) numpy.ndarray
+            Filter output at error signal.
+        e : (N,) numpy.ndarray
+            Error signal.
+        w : (N, length)
+            Filter coefficients at each block.
+
         """
-        x = np.asarray(x)
-        e = np.asarray(e)
+        x = np.atleast_1d(x)
+        d = np.atleast_1d(d)
         assert x.ndim == 1
-        assert x.shape == e.shape
-        if fx is not None:
-            fx = np.asarray(fx)
-            assert x.shape == fx.shape
+        assert x.shape[0] % self.blocklength == 0
+        assert x.shape == d.shape
 
-        assert len(x) % self.blocksize == 0
+        if sec_path_est is not None:
+            fx = lfilter(sec_path_est, 1, x)  # filtered reference signal
+        else:
+            fx = x
 
-        nblocks = int(len(x) / self.blocksize)
+        x = x.reshape((-1, self.blocklength))
+        d = d.reshape((-1, self.blocklength))
+        n_blocks = x.shape[0]
+        w = np.zeros((n_blocks, self.length))  # filter history
+        e = np.zeros((n_blocks, self.blocklength))  # error signal
+        y = np.zeros((n_blocks, self.blocklength))  # filtered output signal
+        u = np.zeros((n_blocks, self.blocklength))  # control signal at error mic
+        fx = fx.reshape((-1, self.blocklength))
 
-        y = np.zeros(len(x))
-        M = self.blocksize
-        for n in range(nblocks):
-            slce = slice(n * M, (n + 1) * M)
+        if sec_path_coeff is not None:
+            zi = np.zeros(len(sec_path_coeff) - 1)
 
-            if fx is not None:
-                self.adapt(fx[slce], e[slce])
+        for n in range(n_blocks):
+            w[n] = self.w
+            y[n] = self.filt(x[n])
+
+            # control signal at error sensor
+            if sec_path_coeff is not None:
+                u[n], zi = lfilter(sec_path_coeff, 1, y[n], zi=zi)
             else:
-                self.adapt(x[slce], e[slce])
+                u[n] = y[n]
 
-            # filter
-            y[n * M : (n + 1) * M] = self.filt(x[slce])
+            # error signal
+            e[n] = d[n] - u[n]
 
-        return y
+            self.adapt(fx[n], e[n])
+
+        return y.reshape(-1), u.reshape(-1), e.reshape(-1), w
 
 
 class LMSFilter(AdaptiveFilter):
-    def __init__(self, filtsize, mu=0.1, leak=0, w_init=None, normalized=True):
-        assert 0 <= leak and leak < 1 / mu
-        self.blocksize = 1
-        self.filtsize = filtsize
-        self.mu = mu
-        self.leak = leak
-        self.normalized = normalized
-        self.lock = False
-        self.w = np.zeros(filtsize)
-        if w_init is not None:
-            self.w[:] = w_init
-
-        self.zifilt = np.zeros(filtsize - 1)
-        self.xbuff = deque(np.zeros(filtsize), maxlen=filtsize)
-        self.ebuff = deque(np.zeros(filtsize), maxlen=filtsize)
-        self.fxbuff = deque(np.zeros(filtsize), maxlen=filtsize)
-
-    def filt2(self, x):
-        """Filter x.
-
-        Parameters
-        ----------
-        x : (N,) array_like
-            Signal.
-
-        Returns
-        -------
-        y : (N, array_like)
-            Filtered signal.
-        """
-        x = np.atleast_1d(x)
-        y, self.zifilt = lfilter(self.w, 1, x, zi=self.zifilt)
-        return y.squeeze()  # return single number if input was single number
-
-    def filt(self, x):
-        assert isinstance(x, float)
-        self.xbuff.appendleft(x)
-        y = np.dot(self.w, self.xbuff)
-        return y
-
-    def adapt(self, x, e):
-        """Adapt filter coefficients.
-
-        Parameters
-        ----------
-        x : (blocksize,) array_like
-            Reference signal.
-        e : (blocksize,) array_like
-            Error signal
-        """
-        x = np.atleast_1d(x)
-        e = np.atleast_1d(e)
-
-        assert len(x) == self.blocksize
-        assert len(e) == self.blocksize
-
-        if self.lock:
-            return
-
-        N = len(x)
-        for n in range(N):
-            self.xbuff.appendleft(x[n])
-            xvec = np.array(self.xbuff)
-
-            if self.normalized:
-                mu = self.mu / (np.dot(xvec, xvec) + 1e-5)
-            else:
-                mu = self.mu
-
-            self.w = (1 - mu * self.leak) * self.w + mu * xvec * np.conj(e[n])
-
-
-class FastBlockLMSFilter(AdaptiveFilter):
-    """Fast Block LMS filter based on overlap-save sectioning."""
+    """A sample-wise Least-Mean-Square adaptive filter."""
 
     def __init__(
         self,
-        blocksize,
-        filtsize=None,
-        mu=0.1,
-        forget=0.1,
-        leak=0,
-        w_init=None,
-        eps=1e-5,
-        constrained=True,
+        length,
+        stepsize=0.1,
+        leakage=0,
+        initial_coeff=None,
+        normalized=True,
+        minimum_power=1e-5,
     ):
-        self.blocksize = blocksize
-        self.mu = mu
-        self.forget = forget
-        self.constrained = constrained
-        self.P = 0
-        self.leak = 0
-        self.eps = eps
-        if filtsize is None:
-            filtsize = blocksize
-        self.W = np.zeros(2 * filtsize, dtype=complex)
-        if w_init:
-            self.W[:] = np.fft.fft(w_init)
-        self.filtsize = filtsize
-        self.last_x = np.zeros(filtsize)
-        self.xbuff = deque(np.zeros(filtsize), maxlen=filtsize)
-        self.fxbuff = deque(np.zeros(filtsize), maxlen=filtsize)
+        """Create sample-wise Least-Mean-Square adaptive filter object.
 
-    def reset(self):
-        self.W = np.zeros(2 * self.filtsize, dtype=complex)
-        super().reset()
+        Parameters
+        ----------
+        length : int
+            Length of filter coefficient vector.
+        stepsize : float, optional
+            Adaptation step size
+        leakage : float, optional
+            Leakage factor.
+        initial_coeff : (length,) array_like or None, optional
+            Initial filter coefficient vector. If `None` defaults to zeros.
+        normalized : bool, optional
+            If `True` take normalize step size with signal power.
+        minimum_power : float, optional
+            Add this to power normalization factor to avoid instability at very small
+            signal levels.
+        """
+        assert 0 <= leakage and leakage < 1 / stepsize
+        self.blocklength = 1
+        self.length = length
+        self.stepsize = stepsize
+        self.leakage = leakage
+        self.minimum_power = minimum_power
+        self.normalized = normalized
+        self.locked = False
+        self.w = np.zeros(length)
+        if initial_coeff is not None:
+            self.w[:] = initial_coeff
+        self.xadaptbuff = deque(np.zeros(length), maxlen=length)
+        self.xfiltbuff = deque(np.zeros(length), maxlen=length)
 
     def filt(self, x):
-        # TODO: only compute once per filt adapt cycle
-        self.X = np.fft.fft(np.concatenate((self.last_x, x)))
-        self.last_x = x
-        y = np.real(np.fft.ifft(self.X * self.W)[self.filtsize :])
+        """Filtering step.
+
+        Parameters
+        ----------
+        x : float
+            Reference signal.
+
+        Returns
+        -------
+        y : float
+            Filter output.
+        """
+        x = float(x)
+        self.xfiltbuff.appendleft(x)
+        y = np.dot(self.w, self.xfiltbuff)
         return y
 
     def adapt(self, x, e):
-        assert len(x) == self.filtsize
-        assert len(e) == self.filtsize
+        """Adaptation step.
 
-        # TODO: only compute once per filt adapt cycle
-        self.X = np.fft.fft(np.concatenate((self.last_x, x)))
+        Parameters
+        ----------
+        x : float
+            Reference signal.
+        e : float
+            Error signal.
+        """
+        x = float(x)
+        e = float(e)
+
+        self.xadaptbuff.appendleft(x)
+
+        if self.locked:
+            return
+
+        xvec = np.array(self.xadaptbuff)
+
+        if self.normalized:
+            stepsize = self.stepsize / (np.dot(xvec, xvec) + self.minimum_power)
+        else:
+            stepsize = self.stepsize
+
+        self.w = (1 - stepsize * self.leakage) * self.w + stepsize * xvec * np.conj(e)
+
+    def reset(self):
+        self.w = np.zeros(self.length)
+        self.xfiltbuff = deque(np.zeros(self.length), maxlen=self.length)
+        self.xadaptbuff = deque(np.zeros(self.length), maxlen=self.length)
+
+
+class FastBlockLMSFilter(AdaptiveFilter):
+    """A fast, block-wise LMS adaptive filter based on overlap-save sectioning."""
+
+    def __init__(
+        self,
+        length=32,
+        blocklength=32,
+        stepsize=0.1,
+        leakage=0,
+        power_averaging=0.5,
+        initial_coeff=None,
+        initial_power=0,
+        minimum_power=1e-5,
+        constrained=True,
+    ):
+        """Create fast, block-wise LMS adaptive filter object.
+
+        Parameters
+        ----------
+        length : int, optional
+            Length of filter coefficient vector.
+        blocklength : int, optional
+            Number of samples in one block.
+        stepsize : float, optional
+            Adaptation step size.
+        leakage : float, optional
+            Leakage factor.
+        power_averaging : float, optional
+            Averaging factor for signal power.
+        initial_coeff : (length,) array_like or None, optional
+            Initial filter coefficient vector. If `None` defaults to zeros.
+        initial_power : float, optional
+            initial signal power.
+        minimum_power : float, optional
+            Add this to power normalization factor to avoid instability at very small
+            signal levels.
+        constrained : bool, optional
+            Description
+
+        Deleted Parameters
+        ------------------
+        normalized : bool, optional
+            If `True` take normalize step size with signal power.
+        """
+        self.blocklength = blocklength
+        self.stepsize = stepsize
+        self.power_averaging = power_averaging
+        self.constrained = constrained
+        self.leakage = 0
+        self.locked = False
+
+        self.minimum_power = minimum_power
+        self.initial_power = initial_power
+        if initial_coeff:
+            self.W[:] = np.fft.fft(initial_coeff)
+
+        if length is None:
+            length = blocklength
+        self.length = length
+
+        # attributes that reset with reset()
+        self.P = initial_power
+        self.W = np.zeros(2 * length, dtype=complex)
+        self.xfiltbuff = deque(np.zeros(2 * length), maxlen=2 * length)
+        self.xadaptbuff = deque(np.zeros(2 * length), maxlen=2 * length)
+        self.eadaptbuff = deque(np.zeros(length), maxlen=length)
+
+    @property
+    def w(self):
+        return np.real(np.fft.ifft(self.W)[: self.length])
+
+    def reset(self):
+        self.P = self.inital_power
+        self.W = np.zeros(2 * self.length, dtype=complex)
+        self.xfiltbuff = deque(np.zeros(2 * self.length), maxlen=2 * self.length)
+        self.xadaptbuff = deque(np.zeros(2 * self.length), maxlen=2 * self.length)
+        self.eadaptbuff = deque(np.zeros(self.length), maxlen=self.length)
+
+    def filt(self, x):
+        """Filtering step.
+
+        Parameters
+        ----------
+        x : (blocklength,) array_like
+            Reference signal.
+
+        Returns
+        -------
+        y : (blocklength,) numpy.ndarray
+            Filter output.
+        """
+        assert len(x) == self.blocklength
+        self.xfiltbuff.extend(x)
+
+        # NOTE: X is computed twice per adaptation cycle if filt and adapt are fed with
+        # the same signal. Needed for FxLMS.
+        X = np.fft.fft(self.xfiltbuff)
+
+        y = np.real(np.fft.ifft(X * self.W)[self.length :])
+        y = y[-self.blocklength :]  # only output the newest block
+        return y
+
+    def adapt(self, x, e):
+        """Adaptation step.
+
+        If `self.locked == True` perform no adaptation, but fill buffers.
+
+        Parameters
+        ----------
+        x : (blocklength,) array_like
+            Reference signal.
+        e : (blocklength,) array_like
+            Error signal.
+        """
+        assert len(x) == self.blocklength
+        assert len(e) == self.blocklength
+        self.xadaptbuff.extend(x)
+        self.eadaptbuff.extend(e)
+
+        if self.locked:
+            return
+
+        X = np.fft.fft(self.xadaptbuff)
 
         # signal power estimation
-        self.P = self.forget * self.P + (1 - self.forget) * np.abs(self.X) ** 2
-        D = 1 / (self.P + self.eps)
+        self.P = (
+            self.power_averaging * self.P + (1 - self.power_averaging) * np.abs(X) ** 2
+        )
+        D = 1 / (self.P + self.minimum_power)
 
         # tap weight adaptation
-        E = np.fft.fft(np.concatenate((np.zeros(self.filtsize), e)))
-        self.W *= 1 - self.mu * self.leak
+        E = np.fft.fft(np.concatenate((np.zeros(self.length), self.eadaptbuff)))
+        self.W *= 1 - self.stepsize * self.leakage
         if self.constrained:
-            Phi = np.fft.ifft(D * self.X.conj() * E)[: self.filtsize]
-            self.W += self.mu * np.fft.fft(
-                np.concatenate((Phi, np.zeros(self.filtsize)))
+            Phi = np.fft.ifft(D * X.conj() * E)[: self.length]
+            self.W += self.stepsize * np.fft.fft(
+                np.concatenate((Phi, np.zeros(self.length)))
             )
         else:
-            self.W += self.mu * D * self.X.conj() * E
-
-        return self.W
-
-    def run(self, x, d):
-        """
-        Parameters
-        ----------
-
-        x : array (N,)
-            Reference signal
-        d : array (M,)
-            Desired signal, M>=N
-
-        """
-        x = np.atleast_1d(x)
-        d = np.atleast_1d(d)
-        assert x.ndim == 1
-        assert x.shape[0] % self.blocksize == 0
-        assert x.shape == d.shape
-
-        x = x.reshape((-1, self.blocksize))
-        d = d.reshape((-1, self.blocksize))
-
-        n_blocks = x.shape[0]
-        w = np.zeros((n_blocks, 2 * self.blocksize))  # filter history
-        e = np.zeros((n_blocks, self.blocksize))  # error signal
-        y = np.zeros((n_blocks, self.blocksize))  # filtered output signal
-
-        for n in range(n_blocks):
-            y[n] = self.filt(x[n])
-            e[n] = d[n] - y[n]
-            W = self.adapt(x[n], e[n])
-            w[n] = np.real(np.fft.ifft(W))
-
-        return y.reshape(-1), e.reshape(-1), w
-
-    def run_filtered_reference(self, x, d, sec_path_coeff, sec_path_coeff_est):
-        """
-        Parameters
-        ----------
-
-        x : array (N,)
-            Reference signal
-        d : array (M,)
-            Desired signal, M>=N
-
-        """
-        x = np.atleast_1d(x)
-        d = np.atleast_1d(d)
-        assert x.ndim == 1
-        assert x.shape[0] % self.blocksize == 0
-        assert x.shape == d.shape
-
-        fx = lfilter(sec_path_coeff_est, 1, x)  # filtered reference signal
-
-        x = x.reshape((-1, self.blocksize))
-        d = d.reshape((-1, self.blocksize))
-        fx = fx.reshape((-1, self.blocksize))
-        n_blocks = x.shape[0]
-
-        w = np.zeros((n_blocks, 2 * self.blocksize))  # filter history
-        e = np.zeros((n_blocks, self.blocksize))  # error signal
-        y = np.zeros((n_blocks, self.blocksize))  # filtered output signal
-        u = np.zeros((n_blocks, self.blocksize))  # control signal at error mic
-
-        zi = np.zeros(len(sec_path_coeff) - 1)
-        for n in range(n_blocks):
-            y[n] = self.filt(x[n])
-            u[n], zi[:] = lfilter(sec_path_coeff, 1, y[n], zi=zi)
-            e[n] = d[n] - u[n]
-            W = self.adapt(fx[n], e[n])
-            w[n] = np.real(np.fft.ifft(W))
-
-        return y.flatten(), u.flatten(), e.flatten(), w
+            self.W += self.stepsize * D * X.conj() * E
