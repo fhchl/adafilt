@@ -97,7 +97,7 @@ class LMSFilter(AdaptiveFilter):
         self,
         length,
         stepsize=0.1,
-        leakage=0,
+        leakage=1,
         initial_coeff=None,
         normalized=True,
         minimum_power=1e-5,
@@ -177,7 +177,7 @@ class LMSFilter(AdaptiveFilter):
         else:
             stepsize = self.stepsize
 
-        self.w = (1 - stepsize * self.leakage) * self.w + stepsize * xvec * np.conj(e)
+        self.w = self.leakage * self.w + stepsize * xvec * np.conj(e)
 
     def reset(self):
         self.w = np.zeros(self.length)
@@ -193,7 +193,7 @@ class FastBlockLMSFilter(AdaptiveFilter):
         length=32,
         blocklength=32,
         stepsize=0.1,
-        leakage=0,
+        leakage=1,
         power_averaging=0.5,
         initial_coeff=None,
         initial_power=0,
@@ -233,7 +233,7 @@ class FastBlockLMSFilter(AdaptiveFilter):
         self.stepsize = stepsize
         self.power_averaging = power_averaging
         self.constrained = constrained
-        self.leakage = 0
+        self.leakage = leakage
         self.locked = False
 
         self.minimum_power = minimum_power
@@ -304,20 +304,21 @@ class FastBlockLMSFilter(AdaptiveFilter):
         self.xadaptbuff.extend(x)
         self.eadaptbuff.extend(e)
 
-        if self.locked:
-            return
-
         X = np.fft.fft(self.xadaptbuff)
 
         # signal power estimation
         self.P = (
             self.power_averaging * self.P + (1 - self.power_averaging) * np.abs(X) ** 2
         )
+
+        if self.locked:
+            return
+
         D = 1 / (self.P + self.minimum_power)
 
         # tap weight adaptation
         E = np.fft.fft(np.concatenate((np.zeros(self.length), self.eadaptbuff)))
-        self.W *= 1 - self.stepsize * self.leakage
+        self.W *= self.leakage
         if self.constrained:
             Phi = np.fft.ifft(D * X.conj() * E)[: self.length]
             self.W += self.stepsize * np.fft.fft(
