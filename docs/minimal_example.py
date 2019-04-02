@@ -1,9 +1,3 @@
-adafilt
-========
-
-Adaptive filters for Python.
-
-```python
 import numpy as np
 
 from adafilt import FastBlockLMSFilter
@@ -47,6 +41,3 @@ for i in range(n_buffers):
 
     # filter
     y = filt.filt(x)
-```
-
-Find the a full example [here](https://github.com/fhchl/adafilt/blob/master/docs/full_example.py).
