@@ -49,4 +49,4 @@ for i in range(n_buffers):
     y = filt.filt(x)
 ```
 
-Find the a full example [here](https://github.com/fhchl/adafilt/blob/master/docs/full_example.py).
+Find the full example [here](https://github.com/fhchl/adafilt/blob/master/docs/full_example.py).

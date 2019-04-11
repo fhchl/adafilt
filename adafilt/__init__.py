@@ -119,8 +119,14 @@ class LMSFilter(AdaptiveFilter):
         minimum_power : float, optional
             Add this to power normalization factor to avoid instability at very small
             signal levels.
+
+        Notes
+        -----
+        The normalised LMS algorithm is optimal in terms of convergence speed, or
+        tracking capabilities, but will not necessarily be optimal in terms of final
+        mean square error (Hansen, p. 419)
         """
-        assert 0 <= leakage and leakage < 1 / stepsize
+        assert 0 < leakage and leakage <= 1
         self.blocklength = 1
         self.length = length
         self.stepsize = stepsize
@@ -199,8 +205,9 @@ class FastBlockLMSFilter(AdaptiveFilter):
         initial_power=0,
         minimum_power=1e-5,
         constrained=True,
+        normalized=True,
     ):
-        """Create fast, block-wise LMS adaptive filter object.
+        """Create fast, block-wise normalized LMS adaptive filter object.
 
         Parameters
         ----------
@@ -223,17 +230,21 @@ class FastBlockLMSFilter(AdaptiveFilter):
             signal levels.
         constrained : bool, optional
             Description
-
-        Deleted Parameters
-        ------------------
         normalized : bool, optional
-            If `True` take normalize step size with signal power.
+            If `True`, normalizes step size with signal power.
+
+        Notes
+        -----
+        The normalised LMS algorithm is optimal in terms of convergence speed, or
+        tracking capabilities, but will not necessarily be optimal in terms of final
+        mean square error (Hansen, p. 419)
         """
         self.blocklength = blocklength
         self.stepsize = stepsize
         self.power_averaging = power_averaging
         self.constrained = constrained
         self.leakage = leakage
+        self.normalized = normalized
         self.locked = False
 
         self.minimum_power = minimum_power
@@ -306,15 +317,19 @@ class FastBlockLMSFilter(AdaptiveFilter):
 
         X = np.fft.fft(self.xadaptbuff)
 
-        # signal power estimation
-        self.P = (
-            self.power_averaging * self.P + (1 - self.power_averaging) * np.abs(X) ** 2
-        )
-
         if self.locked:
             return
 
-        D = 1 / (self.P + self.minimum_power)
+        if self.normalized:
+            # signal power estimation
+            self.P = (
+                self.power_averaging * self.P
+                + (1 - self.power_averaging) * np.abs(X) ** 2
+            )
+            # normalization factor
+            D = 1 / (self.P + self.minimum_power)
+        else:
+            D = 1
 
         # tap weight adaptation
         E = np.fft.fft(np.concatenate((np.zeros(self.length), self.eadaptbuff)))

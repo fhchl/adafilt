@@ -34,7 +34,6 @@ def olafilt(b, x, zi=None):
         final filter delay values.
 
     Source: https://github.com/jthiem/overlapadd
-    TODO: copyright notice?
     """
     b = np.asarray(b)
     x = np.asarray(x)
@@ -113,3 +112,14 @@ def wgn(x, snr, unit=None):
     n *= 1 / np.sqrt(snr) * np.linalg.norm(x) / np.linalg.norm(n)
 
     return n
+
+
+def check_lengths(length, blocklength, h_pri, h_sec):
+    primax = np.argmax(np.abs(h_pri))
+    secmax = np.argmax(np.abs(h_sec))
+
+    assert blocklength <= secmax, f"{blocklength} <= {secmax}"
+    assert blocklength <= primax - secmax, f"{blocklength} <= {primax - secmax}"
+    assert (
+        length > primax - secmax - blocklength
+    ), f"{length} > {primax} - {secmax} - {blocklength}"
