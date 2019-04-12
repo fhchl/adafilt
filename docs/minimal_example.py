@@ -19,18 +19,23 @@ signal = np.random.normal(0, 1, size=n_buffers * blocklength)
 filt = FastBlockLMSFilter(length, blocklength, stepsize=0.1, leakage=0.9999)
 
 # simulates an audio interface with primary and secondary paths and 40 dB SNR noise
+# at the error sensor
 sim = FakeInterface(
-    blocklength, signal, h_pri=h_pri, h_sec=h_sec, noise=wgn(signal, 40, "dB")
+    blocklength,
+    signal,
+    h_pri=h_pri,
+    h_sec=h_sec,
+    noise=wgn(olafilt(h_pri, signal), 40, "dB"),
 )
 
 # secondary path estimate has to account for block size
 h_sec_estimate = np.concatenate((np.zeros(blocklength), h_sec))
 
 zi = np.zeros(len(h_sec_estimate) - 1)  # initialize overlap-add filter with zeros
-y = np.zeros(blocklength)               # control signal is zero for first block
+y = np.zeros(blocklength)  # control signal is zero for first block
 for i in range(n_buffers):
 
-    # simulate the audio interface that records reference signal x and error signal e
+    # record reference signal x and error signal e while playing back y
     x, e, _, _ = sim.playrec(y)
 
     # filter the reference signal

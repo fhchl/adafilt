@@ -36,7 +36,7 @@ zi = np.zeros(len(h_sec_estimate) - 1)  # initialize overlap-add filter with zer
 y = np.zeros(blocklength)               # control signal is zero for first block
 for i in range(n_buffers):
 
-    # simulate the audio interface that records reference signal x and error signal e
+    # record reference signal x and error signal e while playing back y
     x, e, _, _ = sim.playrec(y)
 
     # filter the reference signal
