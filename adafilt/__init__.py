@@ -246,11 +246,8 @@ class FastBlockLMSFilter(AdaptiveFilter):
         self.leakage = leakage
         self.normalized = normalized
         self.locked = False
-
         self.minimum_power = minimum_power
         self.initial_power = initial_power
-        if initial_coeff:
-            self.W[:] = np.fft.fft(initial_coeff)
 
         if length is None:
             length = blocklength
@@ -262,6 +259,10 @@ class FastBlockLMSFilter(AdaptiveFilter):
         self.xfiltbuff = deque(np.zeros(2 * length), maxlen=2 * length)
         self.xadaptbuff = deque(np.zeros(2 * length), maxlen=2 * length)
         self.eadaptbuff = deque(np.zeros(length), maxlen=length)
+
+        if initial_coeff is not None:
+            w = np.concatenate((initial_coeff, np.zeros(length)))
+            self.W[:] = np.fft.fft(w)
 
     @property
     def w(self):
