@@ -217,7 +217,7 @@ class FastBlockLMSFilter(AdaptiveFilter):
             Number of samples in one block.
         stepsize : float, optional
             Adaptation step size.
-        leakage : float, optional
+        leakage : float or (length,) array_like, optional
             Leakage factor.
         power_averaging : float, optional
             Averaging factor for signal power.
@@ -239,11 +239,12 @@ class FastBlockLMSFilter(AdaptiveFilter):
         tracking capabilities, but will not necessarily be optimal in terms of final
         mean square error (Hansen, p. 419)
         """
+        assert length >= blocklength, 'Filter must be at least as long as block'
+
         self.blocklength = blocklength
         self.stepsize = stepsize
         self.power_averaging = power_averaging
         self.constrained = constrained
-        self.leakage = leakage
         self.normalized = normalized
         self.locked = False
         self.minimum_power = minimum_power
@@ -252,6 +253,14 @@ class FastBlockLMSFilter(AdaptiveFilter):
         if length is None:
             length = blocklength
         self.length = length
+
+        if isinstance(leakage, (int, float)):
+            self.leakage = leakage
+        else:
+            leakage = np.asarray(leakage)
+            self.leakage = np.zeros(2 * length)
+            self.leakage[:length] = leakage  # nyquist bin is zero!
+            self.leakage[length + 1 :] = leakage[:0:-1]  # mirror around nyquist bin
 
         # attributes that reset with reset()
         self.P = initial_power
