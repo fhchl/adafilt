@@ -304,11 +304,10 @@ class FastBlockLMSFilter(AdaptiveFilter):
         # the same signal. Needed for FxLMS.
         X = np.fft.fft(self.xfiltbuff)
 
-        y = np.real(np.fft.ifft(X * self.W)[self.length :])
-        y = y[-self.blocklength :]  # only output the newest block
+        y = np.real(np.fft.ifft(X * self.W)[-self.blocklength :])
         return y
 
-    def adapt(self, x, e):
+    def adapt(self, x, e, window=None):
         """Adaptation step.
 
         If `self.locked == True` perform no adaptation, but fill buffers.
@@ -325,6 +324,7 @@ class FastBlockLMSFilter(AdaptiveFilter):
         self.xadaptbuff.extend(x)
         self.eadaptbuff.extend(e)
 
+        # reference signal in frequency domain
         X = np.fft.fft(self.xadaptbuff)
 
         if self.locked:
@@ -341,13 +341,19 @@ class FastBlockLMSFilter(AdaptiveFilter):
         else:
             D = 1
 
-        # tap weight adaptation
+        # error signal in frequency domain
         E = np.fft.fft(np.concatenate((np.zeros(self.length), self.eadaptbuff)))
+
+        # filter weight adaptation
         self.W *= self.leakage
         if self.constrained:
-            Phi = np.fft.ifft(D * X.conj() * E)[: self.length]
-            self.W += self.stepsize * np.fft.fft(
-                np.concatenate((Phi, np.zeros(self.length)))
-            )
+            Phi = np.fft.ifft(D * X.conj() * E)
+            Phi[self.length :] = 0  # make it causal
+            self.W -= self.stepsize * np.fft.fft(Phi)
         else:
-            self.W += self.stepsize * D * X.conj() * E
+            self.W -= self.stepsize * D * X.conj() * E
+
+        if window is not None:
+            w = np.fft.ifft(self.W)
+            w[: self.length] *= window
+            self.W = np.fft.fft(w)
