@@ -78,7 +78,7 @@ class FakeInterface:
         d += next(self.noise)
 
         # NOTE: should this be plus?
-        e = d - u  # error signal
+        e = d + u  # error signal
 
         return x, e, u, d
 

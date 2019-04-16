@@ -183,7 +183,7 @@ class LMSFilter(AdaptiveFilter):
         else:
             stepsize = self.stepsize
 
-        self.w = self.leakage * self.w + stepsize * xvec * np.conj(e)
+        self.w = self.leakage * self.w - stepsize * xvec * np.conj(e)
 
     def reset(self):
         self.w = np.zeros(self.length)
