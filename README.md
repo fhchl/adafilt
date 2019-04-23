@@ -4,9 +4,12 @@ adafilt
 Adaptive filters for Python.
 
 ```python
-import numpy as np
+"""A filtered-reference Least-Mean-Square (FxLMS) filter."""
 
-from adafilt import FastBlockLMSFilter
+import numpy as np
+import matplotlib.pyplot as plt
+
+from adafilt import FastBlockLMSFilter, SimpleFilter
 from adafilt.io import FakeInterface
 from adafilt.utils import olafilt, wgn
 
@@ -24,29 +27,41 @@ signal = np.random.normal(0, 1, size=n_buffers * blocklength)
 # the adaptive filter
 filt = FastBlockLMSFilter(length, blocklength, stepsize=0.1, leakage=0.9999)
 
+# secondary path estimate has to account for block size
+plant_model = SimpleFilter(np.concatenate((np.zeros(blocklength), h_sec)))
+
 # simulates an audio interface with primary and secondary paths and 40 dB SNR noise
+# at the error sensor
 sim = FakeInterface(
-    blocklength, signal, h_pri=h_pri, h_sec=h_sec, noise=wgn(signal, 40, "dB")
+    blocklength,
+    signal,
+    h_pri=h_pri,
+    h_sec=h_sec,
+    noise=wgn(olafilt(h_pri, signal), 40, "dB"),
 )
 
-# secondary path estimate has to account for block size
-h_sec_estimate = np.concatenate((np.zeros(blocklength), h_sec))
-
-zi = np.zeros(len(h_sec_estimate) - 1)  # initialize overlap-add filter with zeros
-y = np.zeros(blocklength)               # control signal is zero for first block
+elog = []
+y = np.zeros(blocklength)  # control signal is zero for first block
 for i in range(n_buffers):
 
     # record reference signal x and error signal e while playing back y
     x, e, _, _ = sim.playrec(y)
 
     # filter the reference signal
-    fx, zi = olafilt(h_sec_estimate, x, zi=zi)
+    fx = plant_model(x)
 
     # adapt filter
     filt.adapt(fx, e)
 
     # filter
     y = filt.filt(x)
+
+    elog.append(e)
+
+plt.plot(np.concatenate(elog), label="e", alpha=0.7)
+plt.xlabel("Sample")
+plt.ylabel("Error Signal")
+plt.show()
 ```
 
-Find the full example [here](https://github.com/fhchl/adafilt/blob/master/docs/full_example.py).
+Find the full example [here](https://github.com/fhchl/adafilt/blob/master/examples/fxLMS.py).

@@ -2,7 +2,8 @@
 
 import numpy as np
 from collections import deque
-from adafilt.utils import lfilter
+
+from adafilt.utils import olafilt
 
 
 class AdaptiveFilter:
@@ -56,7 +57,7 @@ class AdaptiveFilter:
         assert x.shape == d.shape
 
         if sec_path_est is not None:
-            fx = lfilter(sec_path_est, 1, x)  # filtered reference signal
+            fx = olafilt(sec_path_est, x)  # filtered reference signal
         else:
             fx = x
 
@@ -78,7 +79,7 @@ class AdaptiveFilter:
 
             # control signal at error sensor
             if sec_path_coeff is not None:
-                u[n], zi = lfilter(sec_path_coeff, 1, y[n], zi=zi)
+                u[n], zi = olafilt(sec_path_coeff, y[n], zi=zi)
             else:
                 u[n] = y[n]
 
@@ -367,3 +368,34 @@ class FastBlockLMSFilter(AdaptiveFilter):
             w = np.fft.ifft(self.W)
             w[: self.length] *= window
             self.W = np.fft.fft(w)
+
+
+class SimpleFilter:
+    """A overlap-and-add Filter."""
+
+    def __init__(self, w):
+        """Create overlap-add filter object.
+
+        Parameters
+        ----------
+        w : array_like
+            Filter taps.
+        """
+        self.w = w
+        self.zi = np.zeros(len(w))
+
+    def __call__(self, x):
+        """Filter signal x.
+
+        Parameters
+        ----------
+        x : array_like
+            Input signal
+
+        Returns
+        -------
+        y : numpy.ndarray
+            Output signal. Has same length as `x`.
+        """
+        y, self.zi = olafilt(self.w, x, zi=self.zi)
+        return y

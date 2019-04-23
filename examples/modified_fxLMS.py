@@ -1,7 +1,9 @@
+"""A modified filtered-reference Least-Mean-Square filter."""
+
 import numpy as np
 import matplotlib.pyplot as plt
 
-from adafilt import FastBlockLMSFilter
+from adafilt import FastBlockLMSFilter, SimpleFilter
 from adafilt.io import FakeInterface
 from adafilt.utils import olafilt, wgn
 
@@ -19,9 +21,16 @@ h_sec[-1] = 1
 signal = np.random.normal(0, 1, size=n_buffers * blocklength)
 
 # the adaptive filter
-filt = FastBlockLMSFilter(
+filt = FastBlockLMSFilter(length, blocklength)
+
+# the dummy adaptive filter
+filt_dummy = FastBlockLMSFilter(
     length, blocklength, stepsize=0.1, leakage=0.99999, power_averaging=0.9
 )
+
+# secondary path estimate has to account for block size
+plant_model_fx = SimpleFilter(np.concatenate((np.zeros(blocklength), h_sec)))
+plant_model_fy = SimpleFilter(np.concatenate((np.zeros(blocklength), h_sec)))
 
 # simulates an audio interface with primary and secondary paths and 40 dB SNR noise
 # at the error sensor
@@ -34,30 +43,30 @@ sim = FakeInterface(
 )
 
 
-# secondary path estimate has to account for block size
-h_sec_estimate = np.concatenate((np.zeros(blocklength), h_sec))
-
 # aggregate signals during simulation
 xlog = []
 elog = []
 wslog = []
 ylog = []
 
-zi = np.zeros(len(h_sec_estimate) - 1)  # initialize overlap-add filter with zeros
 y = np.zeros(blocklength)  # control signal is zero for first block
 for i in range(n_buffers):
 
     # record reference signal x and error signal e while playing back y
     x, e, _, _ = sim.playrec(y)
 
-    # filter the reference signal
-    fx, zi = olafilt(h_sec_estimate, x, zi=zi)
-
-    # adapt filter
-    filt.adapt(fx, e)
-
-    # filter
     y = filt.filt(x)
+
+    fx = plant_model_fx(x)
+    fy = plant_model_fy(y)
+
+    y_dummy = filt_dummy.filt(fx)
+    p_dummy = e - fy
+    e_dummy = y_dummy + p_dummy
+    filt_dummy.adapt(fx, e_dummy)
+
+    # copy filter coefficients
+    filt.W = filt_dummy.W
 
     xlog.append(x)
     elog.append(e)
