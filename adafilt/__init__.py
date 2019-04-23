@@ -229,15 +229,22 @@ class FastBlockLMSFilter(AdaptiveFilter):
             Add this to power normalization factor to avoid instability at very small
             signal levels.
         constrained : bool, optional
-            Description
+            Causally constrain the filter.
         normalized : bool, optional
-            If `True`, normalizes step size with signal power.
+            If `True`, normalizes step size with signal power. This improves convergence
+            speed at the cost of bias in the filter.
 
         Notes
         -----
         The normalised LMS algorithm is optimal in terms of convergence speed, or
         tracking capabilities, but will not necessarily be optimal in terms of final
         mean square error (Hansen, p. 419)
+
+        TODO:
+        - Gain or power constraints on filters
+          (rafaelyComputationallyEfficientFrequencydomain2000)
+        - Unbiased normalized algorithm
+          (elliottFrequencydomainAdaptationCausal2000)
         """
         assert length >= blocklength, 'Filter must be at least as long as block'
 
@@ -310,7 +317,8 @@ class FastBlockLMSFilter(AdaptiveFilter):
     def adapt(self, x, e, window=None):
         """Adaptation step.
 
-        If `self.locked == True` perform no adaptation, but fill buffers.
+        If `self.locked == True` perform no adaptation, but fill buffers and estimate
+        power.
 
         Parameters
         ----------
@@ -321,14 +329,12 @@ class FastBlockLMSFilter(AdaptiveFilter):
         """
         assert len(x) == self.blocklength
         assert len(e) == self.blocklength
+
         self.xadaptbuff.extend(x)
         self.eadaptbuff.extend(e)
 
         # reference signal in frequency domain
         X = np.fft.fft(self.xadaptbuff)
-
-        if self.locked:
-            return
 
         if self.normalized:
             # signal power estimation
@@ -341,17 +347,21 @@ class FastBlockLMSFilter(AdaptiveFilter):
         else:
             D = 1
 
+        if self.locked:
+            return
+
         # error signal in frequency domain
         E = np.fft.fft(np.concatenate((np.zeros(self.length), self.eadaptbuff)))
 
-        # filter weight adaptation
-        self.W *= self.leakage
+        update = D * X.conj() * E
+
         if self.constrained:
-            Phi = np.fft.ifft(D * X.conj() * E)
-            Phi[self.length :] = 0  # make it causal
-            self.W -= self.stepsize * np.fft.fft(Phi)
-        else:
-            self.W -= self.stepsize * D * X.conj() * E
+            U = np.fft.ifft(update)
+            U[self.length :] = 0  # make it causal
+            update = np.fft.fft(U)
+
+        # filter weight adaptation
+        self.W = self.leakage * self.W - self.stepsize * update
 
         if window is not None:
             w = np.fft.ifft(self.W)
