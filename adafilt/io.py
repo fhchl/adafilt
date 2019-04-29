@@ -8,14 +8,14 @@ from adafilt.utils import lfilter
 class FakeInterface:
     """A fake signal interface."""
 
-    def __init__(self, blocklength, signal, h_pri=[1], h_sec=[1], noise=None):
+    def __init__(self, blocklength, signal=None, h_pri=[1], h_sec=[1], noise=None):
         """Create a fake block based signal interface.
 
         Parameters
         ----------
         blocklength : int
             Number of samples in a block.
-        signal : array_like
+        signal : array_like or None, optional
             The disturbance signal.
         h_pri : array_like, optional
             Primary path impulse response.
@@ -25,16 +25,25 @@ class FakeInterface:
             Description
         """
         self.blocklength = blocklength
+
         self.orig_signal = signal
+        self.orig_noise = noise
+        self.orig_h_pri = h_pri
+        self.orig_h_sec = h_sec
+
+        if signal is None:
+            signal = np.zeros(blocklength)
+
         self.signal = cycle(signal.reshape(-1, blocklength))
         if noise is None:
             noise = np.zeros(blocklength)
-        self.orig_noise = noise
         self.noise = cycle(noise.reshape(-1, blocklength))
-        self.h_pri = h_pri
-        self.h_sec = h_sec
-        self._zi_pri = np.zeros(len(h_pri) - 1)
-        self._zi_sec = np.zeros(len(h_sec) - 1)
+
+        self.h_pri = cycle(np.atleast_2d(h_pri))
+        self.h_sec = cycle(np.atleast_2d(h_sec))
+
+        self._zi_pri = np.zeros(np.atleast_2d(h_pri).shape[1] - 1)
+        self._zi_sec = np.zeros(np.atleast_2d(h_sec).shape[1] - 1)
 
     def rec(self):
         """Record one block of the disturbance after the primary path.
@@ -59,8 +68,9 @@ class FakeInterface:
 
         Returns
         -------
-        e : (blocklength,) ndarray
-            Recorded (error) signal.
+        x, e, u, d : (blocklength,) ndarray
+            Reference signal, error signal, control signal at error microphone, primary
+            at error microphone.
         """
         y = np.atleast_1d(y)
 
@@ -70,10 +80,10 @@ class FakeInterface:
             x = np.zeros(self.blocklength)
 
         d, self._zi_pri = lfilter(
-            self.h_pri, 1, x, zi=self._zi_pri
+            next(self.h_pri), 1, x, zi=self._zi_pri
         )  # primary path signal at error mic
         u, self._zi_sec = lfilter(
-            self.h_sec, 1, y, zi=self._zi_sec
+            next(self.h_sec), 1, y, zi=self._zi_sec
         )  # secondary path signal at error mic
         d += next(self.noise)
 
@@ -86,5 +96,7 @@ class FakeInterface:
         """Reset interface to initial condition."""
         self.signal = cycle(self.orig_signal.reshape(-1, self.blocklength))
         self.noise = cycle(self.orig_noise.reshape(-1, self.blocklength))
-        self._zi_pri = np.zeros(len(self.h_pri) - 1)
-        self._zi_sec = np.zeros(len(self.h_sec) - 1)
+        self.h_pri = cycle(np.atleast_2d(self.orig_h_pri))
+        self.h_sec = cycle(np.atleast_2d(self.orig_h_sec))
+        self._zi_pri = np.zeros(len(self.orig_h_pri) - 1)
+        self._zi_sec = np.zeros(len(self.orig_h_sec) - 1)
