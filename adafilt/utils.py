@@ -8,8 +8,8 @@ def lfilter(b, a, x, zi=None):
     return olafilt(b, x, zi=zi)
 
 
-def olafilt(b, x, zi=None):
-    """Filter a one-dimensional array with an FIR filter.
+def olafilt(b, x, zi=None, squeeze=True):
+    """Filter a multi dimensional array with an FIR filter matrix.
 
     Filter a data sequence, `x`, using a FIR filter given in `b`.
     Filtering uses the overlap-add method converting both `x` and `b`
@@ -18,56 +18,67 @@ def olafilt(b, x, zi=None):
 
     Parameters
     ----------
-    b : one-dimensional numpy array
-        The impulse response of the filter
-    x : one-dimensional numpy array
-        Signal to be filtered
-    zi : one-dimensional numpy array, optional
+    b : array_like, shape ([[Nin,] Nout,] M)
+        The impulse response of the filter matrix.
+    x : array_like, shape ([Nin,] N)
+        Signal to be filtered.
+    zi : array_like, shape ([[Nout,] K), optional
         Initial condition of the filter, but in reality just the
         runout of the previous computation.  If `zi` is None or not
         given, then zero initial state is assumed.
+    squeeze : bool, optional
+        If `True`, squeeze dimensions from output arrays.
 
     Returns
     -------
-    y : array
+    y : numpy.ndarray, shape ([Nout,] N)
         The output of the digital filter.
-    zf : array, optional
+    zf : numpy.ndarray, shape ([Nout,] M - 1), optional
         If `zi` is None, this is not returned, otherwise, `zf` holds the
         final filter delay values.
 
-    Source: https://github.com/jthiem/overlapadd
+    Notes
+    -----
+    Based on olfilt from `https://github.com/jthiem/overlapadd`
     """
-    b = np.asarray(b)
-    x = np.asarray(x)
+    # bring into broadcasting shape
+    b = np.array(b, copy=False, ndmin=3)
+    x = np.array(x, copy=False, ndmin=2)
 
-    L_I = b.shape[0]
-    # Find power of 2 larger that 2*L_I (from abarnert on Stackoverflow)
-    L_F = 2 << (L_I - 1).bit_length()
-    L_S = L_F - L_I + 1
-    L_sig = x.shape[0]
+    _, Nout, L_I = b.shape
+
+    # find power of 2 larger that 2*L_I (from abarnert on Stackoverflow)
+    L_F = 2 << (L_I - 1).bit_length()  # FFT Size
+    L_S = L_F - L_I + 1  # length of segments
+    L_sig = x.shape[-1]
     offsets = range(0, L_sig, L_S)
 
     # handle complex or real input
     if np.iscomplexobj(b) or np.iscomplexobj(x):
         fft_func = np.fft.fft
         ifft_func = np.fft.ifft
-        res = np.zeros(L_sig + L_F, dtype=np.complex128)
+        res = np.zeros((Nout, L_sig + L_F), dtype=np.complex128)
     else:
         fft_func = np.fft.rfft
         ifft_func = np.fft.irfft
-        res = np.zeros(L_sig + L_F)
+        res = np.zeros((Nout, L_sig + L_F))
 
-    FDir = fft_func(b, n=L_F)
+    B = fft_func(b, n=L_F)
 
     # overlap and add
     for n in offsets:
-        res[n : n + L_F] += ifft_func(fft_func(x[n : n + L_S], n=L_F) * FDir)
+        Xseg = fft_func(x[..., n : n + L_S], n=L_F)
+        res[..., n : n + L_F] += ifft_func(np.einsum("ik,ijk->jk", Xseg, B))
 
     if zi is not None:
-        res[: zi.shape[0]] = res[: zi.shape[0]] + zi
-        return res[:L_sig], res[L_sig:]
+        zi = np.array(zi, copy=True, ndmin=2)
+        res[..., : zi.shape[-1]] = res[..., : zi.shape[-1]] + zi
+        y = res[..., :L_sig]
+        zf = res[..., L_sig : L_sig + L_I - 1]
+        return (y.squeeze(), zf.squeeze()) if squeeze else (y, zf)
     else:
-        return res[:L_sig]
+        y = res[..., :L_sig]
+        return y.squeeze() if squeeze else y
 
 
 def wgn(x, snr, unit=None):

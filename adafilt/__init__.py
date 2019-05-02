@@ -381,8 +381,13 @@ class SimpleFilter:
         w : array_like
             Filter taps.
         """
+        w = np.asarray(w)
         self.w = w
-        self.zi = np.zeros(len(w))
+        if w.ndim == 1:
+            zishape = w.shape[0] - 1
+        else:
+            zishape = w.shape[-2:]
+        self.zi = np.zeros(zishape)
 
     def __call__(self, x):
         """Filter signal x.
@@ -397,5 +402,86 @@ class SimpleFilter:
         y : numpy.ndarray
             Output signal. Has same length as `x`.
         """
-        y, self.zi = olafilt(self.w, x, zi=self.zi)
+        y, self.zi[:] = olafilt(self.w, x, zi=self.zi)
+        return y
+
+
+class MultiChannelBlockLMS(AdaptiveFilter):
+    """A multi-channel block-wise LMS adaptive filter."""
+
+    def __init__(
+        self,
+        nin=1,
+        nref=1,
+        nout=2,
+        length=32,
+        blocklength=32,
+        stepsize=0.1,
+        leakage=1,
+        power_averaging=0.5,
+        initial_coeff=None,
+        initial_power=0,
+        minimum_power=1e-5,
+        constrained=True,
+        normalized=True,
+    ):
+        """Create multi-channel block-wise LMS adaptive filter object.
+        """
+        assert length >= blocklength, 'Filter must be at least as long as block'
+
+        self.blocklength = blocklength
+        self.stepsize = stepsize
+        self.power_averaging = power_averaging
+        self.constrained = constrained
+        self.normalized = normalized
+        self.locked = False
+        self.minimum_power = minimum_power
+        self.initial_power = initial_power
+
+        if length is None:
+            length = blocklength
+        self.length = length
+
+        if isinstance(leakage, (int, float)):
+            self.leakage = leakage
+        else:
+            leakage = np.asarray(leakage)
+            self.leakage = np.zeros(2 * length)
+            self.leakage[:length] = leakage  # nyquist bin is zero!
+            self.leakage[length + 1 :] = leakage[:0:-1]  # mirror around nyquist bin
+
+        # attributes that reset with reset()
+        self.P = initial_power
+        self.W = np.zeros((nout, nref, 2 * length), dtype=complex)  # shape (nout, 2 * length)
+        self.xfiltbuff = deque(np.zeros(2 * length), maxlen=2 * length)  # shape (nout, 2 * length)
+        self.xadaptbuff = deque(np.zeros(2 * length), maxlen=2 * length)
+        self.eadaptbuff = deque(np.zeros(length), maxlen=length)
+
+        if initial_coeff is not None:
+            w = np.concatenate((initial_coeff, np.zeros(length)))
+            self.W[:] = np.fft.fft(w)
+
+    def filt(self, x):
+        """Filtering step.
+
+        Parameters
+        ----------
+        x : (blocklength, nref) array_like
+            Reference signal.
+
+        Returns
+        -------
+        y : (blocklength, nour) numpy.ndarray
+            Filter output.
+        """
+        assert x.shape[0] == self.blocklength
+        assert x.shape[1] == self.nref
+
+        self.xfiltbuff.extend(x)
+
+        # NOTE: X is computed twice per adaptation cycle if filt and adapt are fed with
+        # the same signal. Needed for FxLMS.
+        X = np.fft.fft(self.xfiltbuff, axis=0)  # shape ()
+
+        y = np.real(np.fft.ifft(self.W @ X)[-self.blocklength :])
         return y
