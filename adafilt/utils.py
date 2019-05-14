@@ -8,7 +8,33 @@ def lfilter(b, a, x, zi=None):
     return olafilt(b, x, zi=zi)
 
 
-def olafilt(b, x, zi=None, squeeze=True):
+def atleast_2d(a):
+    """Similar to numpy.atleast_2d, but always appends new axis."""
+    a = np.asanyarray(a)
+    if a.ndim == 0:
+        result = a.reshape(1, 1)
+    elif a.ndim == 1:
+        result = a[:, np.newaxis]
+    else:
+        result = a
+    return result
+
+
+def atleast_3d(a):
+    """Similar to numpy.atleast_3d, but always appends new axis."""
+    a = np.asanyarray(a)
+    if a.ndim == 0:
+        result = a.reshape(1, 1, 1)
+    elif a.ndim == 1:
+        result = a[:, np.newaxis, np.newaxis]
+    elif a.ndim == 2:
+        result = a[..., np.newaxis]
+    else:
+        result = a
+    return result
+
+
+def olafilt(b, x, zi=None, squeeze=True, sum_inputs=True):
     """Filter a multi dimensional array with an FIR filter matrix.
 
     Filter a data sequence, `x`, using a FIR filter given in `b`.
@@ -18,66 +44,75 @@ def olafilt(b, x, zi=None, squeeze=True):
 
     Parameters
     ----------
-    b : array_like, shape ([[Nin,] Nout,] M)
+    b : array_like, shape (m, [L, [M]] )
         The impulse response of the filter matrix.
-    x : array_like, shape ([Nin,] N)
+    x : array_like, shape (n, [K])
         Signal to be filtered.
-    zi : array_like, shape ([[Nout,] K), optional
+    zi : array_like, shape (m - 1, [L[, M, [K]]]), optional
         Initial condition of the filter, but in reality just the
         runout of the previous computation.  If `zi` is None or not
         given, then zero initial state is assumed.
     squeeze : bool, optional
         If `True`, squeeze dimensions from output arrays.
+    sum_inputs : bool, optional
+        If `True`, sum the result over all inputs, assuming `M == K`. If `False`, return
+        all possible combinations of filtering x with the filters in b without summing.
 
     Returns
     -------
-    y : numpy.ndarray, shape ([Nout,] N)
-        The output of the digital filter.
-    zf : numpy.ndarray, shape ([Nout,] M - 1), optional
+    y : numpy.ndarray
+        The output of the digital filter. Has shape (n, [L]), if `sum_inputs==True`,
+        else shape (n, [L[, M, [K]]]).
+    zf : numpy.ndarray
         If `zi` is None, this is not returned, otherwise, `zf` holds the
-        final filter delay values.
+        final filter state. Has shape (m - 1, [L]), if `sum_inputs=True`, else shape
+        (m - 1, [L[, M, [K]]]).
 
     Notes
     -----
-    Based on olfilt from `https://github.com/jthiem/overlapadd`
+    Based on olafilt from `https://github.com/jthiem/overlapadd`
+
     """
     # bring into broadcasting shape
-    b = np.array(b, copy=False, ndmin=3)
-    x = np.array(x, copy=False, ndmin=2)
+    b = atleast_3d(b)
+    x = atleast_2d(x)
 
-    _, Nout, L_I = b.shape
+    L_I, L, M = b.shape
+    _, K = x.shape
 
     # find power of 2 larger that 2*L_I (from abarnert on Stackoverflow)
     L_F = 2 << (L_I - 1).bit_length()  # FFT Size
     L_S = L_F - L_I + 1  # length of segments
-    L_sig = x.shape[-1]
+    L_sig = x.shape[0]
     offsets = range(0, L_sig, L_S)
+    shape = (L_sig + L_F, L) if sum_inputs else (L_sig + L_F, L, M, K)
 
     # handle complex or real input
     if np.iscomplexobj(b) or np.iscomplexobj(x):
         fft_func = np.fft.fft
         ifft_func = np.fft.ifft
-        res = np.zeros((Nout, L_sig + L_F), dtype=np.complex128)
+        res = np.zeros(shape, dtype=np.complex128)
     else:
         fft_func = np.fft.rfft
         ifft_func = np.fft.irfft
-        res = np.zeros((Nout, L_sig + L_F))
+        res = np.zeros(shape)
 
-    B = fft_func(b, n=L_F)
+    B = fft_func(b, n=L_F, axis=0)
 
     # overlap and add
+    signature = 'nlm,nm->nl' if sum_inputs else 'nlm,nk->nlmk'
     for n in offsets:
-        Xseg = fft_func(x[..., n : n + L_S], n=L_F)
-        res[..., n : n + L_F] += ifft_func(np.einsum("ik,ijk->jk", Xseg, B))
+        Xseg = fft_func(x[n : n + L_S], n=L_F, axis=0)
+        res[n : n + L_F] += ifft_func(np.einsum(signature, B , Xseg), axis=0)
 
     if zi is not None:
-        zi = np.array(zi, copy=True, ndmin=2)
-        res[..., : zi.shape[-1]] = res[..., : zi.shape[-1]] + zi
-        y = res[..., :L_sig]
-        zf = res[..., L_sig : L_sig + L_I - 1]
+        zi = atleast_2d(zi)
+        res[: zi.shape[0]] = res[: zi.shape[0]] + zi
+        y = res[:L_sig]
+        zf = res[L_sig : L_sig + L_I - 1]
         return (y.squeeze(), zf.squeeze()) if squeeze else (y, zf)
     else:
-        y = res[..., :L_sig]
+        y = res[:L_sig]
         return y.squeeze() if squeeze else y
 
 

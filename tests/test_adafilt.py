@@ -8,11 +8,11 @@ from adafilt.utils import olafilt
 
 class TestOlafilt:
     def test_behaves_like_scipy(self):
-        M = 123
-        N = 1024
-        h = np.random.random(M)
-        x = np.random.random(N)
-        zi = np.random.random(M - 1)
+        m = 123
+        n = 1024
+        h = np.random.random(m)
+        x = np.random.random(n)
+        zi = np.random.random(m - 1)
 
         yola, zfola = olafilt(h, x, zi=zi)
         y, zf = lfilter(h, 1, x, zi=zi)
@@ -24,56 +24,54 @@ class TestOlafilt:
         assert np.array_equal(zi.shape, zf.shape)
 
     def test_many_to_many(self):
-        M = 123
-        N = 1024
-        Nin, Nout = (5, 7)
-        x = np.random.random((Nin, N))
-        h = np.random.random((Nin, Nout, M))
-        zi = np.random.random((Nin, Nout, M - 1))
-        zj = np.sum(zi, axis=0)
+        m = 123
+        n = 1024
+        K, L = (5, 7)
+        x = np.random.random((n, K))
+        h = np.random.random((m, L, K))
+        zi = np.random.random((m - 1, L, K))
+        zj = np.sum(zi, axis=-1)
 
         yola, zfola = olafilt(h, x, zi=zj, squeeze=False)
 
-        y = np.zeros((Nout, N))
-        zf = np.zeros((Nout, M - 1))
-        for o in range(Nout):
-            for i in range(Nin):
-                yt, zft = lfilter(h[i, o], 1, x[i], zi=zi[i, o])
-                y[o] += yt
-                zf[o] += zft
+        y = np.zeros((n, L))
+        zf = np.zeros((m - 1, L))
+        for o in range(L):
+            for i in range(K):
+                yt, zft = lfilter(h[:, o, i], 1, x[:, i], zi=zi[:, o, i])
+                y[:, o] += yt
+                zf[:, o] += zft
 
         npt.assert_almost_equal(y, yola)
         npt.assert_almost_equal(zf, zfola)
 
     def test_multiple_outputs(self):
-        M = 123
-        N = 1024
-        Nout = 7
-        x = np.random.random(N)
-        h = np.random.random((Nout, M))
-        zi = np.random.random((Nout, M - 1))
+        m = 123
+        n = 1024
+        L = 7
+        x = np.random.random(n)
+        h = np.random.random((m, L))
+        zi = np.random.random((m - 1, L))
 
         yola, zfola = olafilt(h, x, zi=zi)
-        for o in range(Nout):
-            y, zf = lfilter(h[o], 1, x, zi=zi[o])
-            npt.assert_almost_equal(y, yola[o])
-            npt.assert_almost_equal(zf, zfola[o])
+        for o in range(L):
+            y, zf = lfilter(h[:, o], 1, x, zi=zi[:, o])
+            npt.assert_almost_equal(y, yola[:, o])
+            npt.assert_almost_equal(zf, zfola[:, o])
 
     def test_multiple_inputs(self):
-        M = 123
-        N = 1024
-        Nin = 2
-        Nout = 1
-        x = np.random.random((Nin, N))
-        h = np.random.random((Nin, Nout, M))
-        zi = np.random.random((Nout, M - 1))
-        # zi = np.zeros((Nout, M - 1))
+        m = 123
+        n = 1024
+        L, K = (1, 3)
+        x = np.random.random((n, K))
+        h = np.random.random((m, L, K))
+        zi = np.random.random((m - 1, L))
 
         yola, zfola = olafilt(h, x, zi=zi)
         y = 0
         zf = 0
-        for i in range(Nin):
-            yt, zft = lfilter(h[i, 0], 1, x[i], zi=zi[0] / Nin)
+        for i in range(K):
+            yt, zft = lfilter(h[:, 0, i], 1, x[:, i], zi=zi[:, 0] / K)
             y += yt
             zf += zft
 
@@ -81,14 +79,12 @@ class TestOlafilt:
         npt.assert_almost_equal(y, yola)
 
     def test_does_not_modify_inputs(self):
-        M = 123
-        N = 1024
-        Nin = 5
-        Nout = 8
-
-        x = np.random.random((Nin, N))
-        h = np.random.random((Nin, Nout, M))
-        zi = np.random.random((Nout, M - 1))
+        m = 123
+        n = 1024
+        K, L = (4, 8)
+        x = np.random.random((n, K))
+        h = np.random.random((m, L, K))
+        zi = np.random.random((m - 1, L))
 
         x0 = x.copy()
         zi0 = zi.copy()
@@ -100,10 +96,47 @@ class TestOlafilt:
         np.array_equal(x, x0)
         np.array_equal(zi, zi0)
 
+    def test_does_not_sum(self):
+        m = 123
+        n = 1024
+        L, M, K = (4, 3, 2)
+        x = np.random.random((n, K))
+        h = np.random.random((m, L, M))
+        zi = np.random.random((m - 1, L, M, K))
 
-if __name__ == '__main__':
-    TestOlafilt().test_behaves_like_scipy()
-    TestOlafilt().test_many_to_many()
-    TestOlafilt().test_multiple_inputs()
-    TestOlafilt().test_multiple_outputs()
-    TestOlafilt().test_behaves_like_scipy()
+        yola, zfola = olafilt(h, x, zi=zi, squeeze=False, sum_inputs=False)
+
+        y = np.zeros((n, L))
+        zf = np.zeros((m - 1, L))
+        for l in range(L):
+            for m in range(M):
+                for k in range(K):
+                    y, zf = lfilter(h[:, l, m], 1, x[:, k], zi=zi[:, l, m, k])
+                    npt.assert_almost_equal(y, yola[:, l, m, k])
+                    npt.assert_almost_equal(zf, zfola[:, l, m, k])
+
+    def test_works_with_any_input_shape(self):
+
+        def test_shape(L, M, K):
+            m = 123
+            n = 1024
+            x = np.random.random((n, K))
+            h = np.random.random((m, L, M))
+            zi = np.random.random((m - 1, L, M, K))
+
+            yola, zfola = olafilt(h, x, zi=zi, squeeze=False, sum_inputs=False)
+
+            y = np.zeros((n, L))
+            zf = np.zeros((m - 1, L))
+            for l in range(L):
+                for m in range(M):
+                    for k in range(K):
+                        y, zf = lfilter(h[:, l, m], 1, x[:, k], zi=zi[:, l, m, k])
+                        npt.assert_almost_equal(y, yola[:, l, m, k])
+                        npt.assert_almost_equal(zf, zfola[:, l, m, k])
+
+        Ls = range(1, 4)
+        Ms = range(1, 4)
+        Ks = range(1, 4)
+
+        [test_shape(L, M, K) for L in Ls for M in Ms for K in Ks]
