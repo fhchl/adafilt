@@ -3,7 +3,49 @@
 import numpy as np
 from collections import deque
 
-from adafilt.utils import olafilt
+from adafilt.utils import olafilt, atleast_2d
+
+
+class SimpleFilter:
+    """A overlap-and-add Filter."""
+
+    def __init__(self, w, sum_inputs=True, squeeze=True):
+        """Create overlap-add filter object.
+
+        Parameters
+        ----------
+        w : array_like
+            Filter taps.
+
+        """
+        w = np.asarray(w)
+        self.w = w
+        self.sum_inputs = sum_inputs
+        self.squeeze = squeeze
+
+        if sum_inputs:
+            self.zi = np.zeros((w.shape[0] - 1, 1))
+        else:
+            self.zi = np.zeros((w.shape[0] - 1, 1, 1, 1))
+
+    def __call__(self, x):
+        """Filter signal x.
+
+        Parameters
+        ----------
+        x : array_like
+            Input signal
+
+        Returns
+        -------
+        y : numpy.ndarray
+            Output signal. Has same length as `x`.
+
+        """
+        y, self.zi = olafilt(
+            self.w, x, zi=self.zi, sum_inputs=self.sum_inputs, squeeze=self.squeeze
+        )
+        return y
 
 
 class AdaptiveFilter:
@@ -247,7 +289,7 @@ class FastBlockLMSFilter(AdaptiveFilter):
         - Unbiased normalized algorithm
           (elliottFrequencydomainAdaptationCausal2000)
         """
-        assert length >= blocklength, 'Filter must be at least as long as block'
+        assert length >= blocklength, "Filter must be at least as long as block"
 
         self.blocklength = blocklength
         self.stepsize = stepsize
@@ -357,6 +399,8 @@ class FastBlockLMSFilter(AdaptiveFilter):
         update = D * X.conj() * E
 
         if self.constrained:
+            # note that constraining the frequency dependent step size to be causal
+            # can be problematc, see Elliot p. 153
             U = np.fft.ifft(update)
             U[self.length :] = 0  # make it causal
             update = np.fft.fft(U)
@@ -370,73 +414,33 @@ class FastBlockLMSFilter(AdaptiveFilter):
             self.W = np.fft.fft(w)
 
 
-class SimpleFilter:
-    """A overlap-and-add Filter."""
-
-    def __init__(self, w):
-        """Create overlap-add filter object.
-
-        Parameters
-        ----------
-        w : array_like
-            Filter taps.
-        """
-        w = np.asarray(w)
-        self.w = w
-        if w.ndim == 1:
-            zishape = w.shape[0] - 1
-        else:
-            zishape = w.shape[-2:]
-        self.zi = np.zeros(zishape)
-
-    def __call__(self, x):
-        """Filter signal x.
-
-        Parameters
-        ----------
-        x : array_like
-            Input signal
-
-        Returns
-        -------
-        y : numpy.ndarray
-            Output signal. Has same length as `x`.
-        """
-        y, self.zi[:] = olafilt(self.w, x, zi=self.zi)
-        return y
-
-
 class MultiChannelBlockLMS(AdaptiveFilter):
     """A multi-channel block-wise LMS adaptive filter."""
 
     def __init__(
         self,
-        nin=1,
-        nref=1,
-        nout=2,
+        Nout=1,
+        Nin=1,
+        Nsens=1,
         length=32,
         blocklength=32,
         stepsize=0.1,
         leakage=1,
         power_averaging=0.5,
         initial_coeff=None,
-        initial_power=0,
-        minimum_power=1e-5,
         constrained=True,
-        normalized=True,
     ):
-        """Create multi-channel block-wise LMS adaptive filter object.
-        """
-        assert length >= blocklength, 'Filter must be at least as long as block'
+        """Create multi-channel block-wise LMS adaptive filter object."""
+        assert length >= blocklength, "Filter must be at least as long as block"
+        assert length % blocklength == 0
 
+        self.Nin, self.Nout, self.Nsens = Nin, Nout, Nsens
         self.blocklength = blocklength
         self.stepsize = stepsize
+        self.num_saved_blocks = length // blocklength
         self.power_averaging = power_averaging
         self.constrained = constrained
-        self.normalized = normalized
         self.locked = False
-        self.minimum_power = minimum_power
-        self.initial_power = initial_power
 
         if length is None:
             length = blocklength

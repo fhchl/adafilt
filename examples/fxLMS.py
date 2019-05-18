@@ -22,7 +22,7 @@ signal = np.random.normal(0, 1, size=n_buffers * blocklength)
 
 # the adaptive filter
 filt = FastBlockLMSFilter(
-    length, blocklength, stepsize=0.1, leakage=0.99999, power_averaging=0.9
+    length, blocklength, stepsize=0.1, leakage=1, power_averaging=0.9
 )
 
 # simulates an audio interface with primary and secondary paths and 40 dB SNR noise
@@ -37,7 +37,7 @@ sim = FakeInterface(
 
 
 # secondary path estimate has to account for block size
-plant_model = SimpleFilter(np.concatenate((np.zeros(blocklength), h_sec)))
+plant_model = SimpleFilter(0.99 * np.concatenate((np.zeros(blocklength), h_sec)))
 
 # aggregate signals during simulation
 xlog = []
