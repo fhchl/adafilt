@@ -14,14 +14,10 @@ n_buffers = 150  # size of simulation
 h = np.zeros(512)
 h[255] = 1
 
-# white noise signal
-signal = np.random.normal(0, 1, size=n_buffers * blocklength)
-
 # the adaptive filter
 filt = FastBlockLMSFilter(length, blocklength, power_averaging=0.9)
 
-# simulates an audio interface with primary and secondary paths and 40 dB SNR noise
-# at the error sensor
+# simulates an audio interface
 sim = FakeInterface(blocklength, h_sec=h)
 
 # aggregate signals during simulation
