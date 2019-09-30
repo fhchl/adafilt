@@ -4,6 +4,7 @@ import numpy.testing as npt
 from scipy.signal import lfilter
 
 from adafilt.utils import olafilt
+from adafilt.io import FakeInterface
 
 
 class TestOlafilt:
@@ -116,7 +117,6 @@ class TestOlafilt:
                     npt.assert_almost_equal(zf, zfola[:, l, m, k])
 
     def test_works_with_any_input_shape(self):
-
         def test_shape(L, M, K):
             m = 123
             n = 1024
@@ -140,3 +140,79 @@ class TestOlafilt:
         Ks = range(1, 4)
 
         [test_shape(L, M, K) for L in Ls for M in Ms for K in Ks]
+
+
+class TestIO:
+    def test_FakeInterface_output(self):
+
+        h_pri = np.random.normal(0, 1, 5)
+        h_sec = np.random.normal(0, 1, 24)
+        buffsize = 16
+        buffers = 100
+        signal = np.random.normal(0, 1, size=buffers * buffsize)
+        sim = FakeInterface(buffsize, signal, h_pri=h_pri, h_sec=h_sec)
+
+        ys = []
+        xs = []
+        es = []
+        us = []
+        ds = []
+
+        for i in range(buffers):
+            y = np.random.normal(0, 1, buffsize)
+            x, e, u, d = sim.playrec(y, send_signal=True)
+            xs.append(x)
+            es.append(e)
+            ds.append(d)
+            us.append(u)
+            ys.append(y)
+
+        y = np.concatenate(ys)
+        x = np.concatenate(xs)
+        e = np.concatenate(es)
+        u = np.concatenate(us)
+        d = np.concatenate(ds)
+
+        assert np.all(x == signal)
+        npt.assert_almost_equal(d, olafilt(h_pri, x))
+        npt.assert_almost_equal(u, olafilt(h_sec, y))
+        npt.assert_almost_equal(e, u + d)
+
+    def test_FakeInterface_filtering(self):
+        h_pri = [0, 0, 0, 0, 1, 0, 1]  # primary path impulse response
+        h_sec = [0, 0, 1, 0.5]
+        buffsize = 16
+        buffers = 100
+        signal = np.random.normal(0, 1, size=buffers * buffsize)
+        sim = FakeInterface(buffsize, signal, h_pri=h_pri, h_sec=h_sec)
+        sim = FakeInterface(buffsize, signal, h_pri=h_pri, h_sec=h_sec)
+
+        # measure primary path
+        xs = []
+        es = []
+        for i in range(buffers):
+            x, e, _, _ = sim.rec()
+            xs.append(x)
+            es.append(e)
+
+        xs = np.concatenate(xs)
+        es = np.concatenate(es)
+
+        h_pri_meas = np.fft.irfft(np.fft.rfft(es) / np.fft.rfft(xs))[:10]
+
+        # measure secondary path
+        ys = []
+        us = []
+        for i in range(buffers):
+            y = np.random.normal(0, 1, size=buffsize)
+            _, e, _, _ = sim.playrec(y, send_signal=False)
+            ys.append(y)
+            us.append(e)
+
+        ys = np.concatenate(ys)
+        us = np.concatenate(us)
+
+        h_sec_meas = np.fft.irfft(np.fft.rfft(us) / np.fft.rfft(ys))[:10]
+
+        npt.assert_almost_equal(h_pri_meas[:len(h_pri)], h_pri, decimal=2)
+        npt.assert_almost_equal(h_sec_meas[:len(h_sec)], h_sec, decimal=2)

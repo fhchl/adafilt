@@ -1,8 +1,8 @@
-"""Summary
-"""
+"""Input and output classes."""
+
 from itertools import cycle
 import numpy as np
-from adafilt.utils import lfilter
+from adafilt.utils import olafilt
 
 
 class FakeInterface:
@@ -23,6 +23,7 @@ class FakeInterface:
             Secondary path impulse response.
         noise : None, optional
             Description
+
         """
         self.blocklength = blocklength
 
@@ -52,6 +53,7 @@ class FakeInterface:
         -------
         e : (blocklength,) ndarray
             Recorded (error) signal.
+
         """
         return self.playrec(np.zeros(self.blocklength))
 
@@ -71,6 +73,7 @@ class FakeInterface:
         x, e, u, d : (blocklength,) ndarray
             Reference signal, error signal, control signal at error microphone, primary
             at error microphone.
+
         """
         y = np.atleast_1d(y)
 
@@ -79,15 +82,14 @@ class FakeInterface:
         else:
             x = np.zeros(self.blocklength)
 
-        d, self._zi_pri = lfilter(
-            next(self.h_pri), 1, x, zi=self._zi_pri
+        d, self._zi_pri = olafilt(
+            next(self.h_pri), x, zi=self._zi_pri
         )  # primary path signal at error mic
-        u, self._zi_sec = lfilter(
-            next(self.h_sec), 1, y, zi=self._zi_sec
+        u, self._zi_sec = olafilt(
+            next(self.h_sec), y, zi=self._zi_sec
         )  # secondary path signal at error mic
         d += next(self.noise)
 
-        # NOTE: should this be plus?
         e = d + u  # error signal
 
         return x, e, u, d
