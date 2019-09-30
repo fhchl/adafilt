@@ -5,7 +5,7 @@ from scipy.signal import lfilter
 
 from adafilt.utils import olafilt
 from adafilt.io import FakeInterface
-
+from adafilt.optimal import wiener_filter
 
 class TestOlafilt:
     def test_behaves_like_scipy(self):
@@ -216,3 +216,30 @@ class TestIO:
 
         npt.assert_almost_equal(h_pri_meas[:len(h_pri)], h_pri, decimal=2)
         npt.assert_almost_equal(h_sec_meas[:len(h_sec)], h_sec, decimal=2)
+
+
+class TestOptimal:
+
+    def test_wiener_filter_unconstrained_causal(self):
+        h = [1, -1, 0.5]
+        x = np.random.random(2**14)
+        y = olafilt(h, x)
+
+        h_est = - np.real(np.fft.ifft(wiener_filter(x, y, 32, constrained=False)))
+        npt.assert_almost_equal(h, h_est[:len(h)], decimal=2)
+
+    def test_wiener_filter_constrained_causal(self):
+        h = [1, -1, 0.5]
+        x = np.random.random(2**14)
+        y = olafilt(h, x)
+
+        h_est = - np.real(np.fft.ifft(wiener_filter(x, y, 32, constrained=True)))
+        npt.assert_almost_equal(h, h_est[:len(h)], decimal=2)
+
+    def test_wiener_filter_constrained_noncausal(self):
+        h = [1, 0, 1]
+        x = np.random.random(2**15)
+        y = olafilt(h, x)
+
+        h_est = - np.real(np.fft.ifft(wiener_filter(x, y, 256, g=[0, 1], constrained=True)))
+        npt.assert_almost_equal([0, 1, 0], h_est[:len(h)], decimal=2)

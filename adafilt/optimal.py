@@ -1,18 +1,20 @@
 """Functions for the optimal filtering problem."""
 
 import numpy as np
-from scipy.signal import csd
+from scipy.signal import csd, welch
 from adafilt.utils import atleast_2d, atleast_3d
 
 
-def static_filter(p, g, n, squeeze=True):
+def static_filter(p, g, n=None, squeeze=True):
     """Compute the optimal cancellation filter from primary and secondary paths.
+
+    Note that this filter can be non-causal.
 
     Parameters
     ----------
-    p : array_like, shape (N1[, L])
+    p : array_like, shape (N[, L])
         Primary path impulse response.
-    g : array_like, shape (N2[, L[, M]])
+    g : array_like, shape (N[, L[, M]])
         Secondary path impulse response.
     n : int
         Output filter length.
@@ -25,6 +27,11 @@ def static_filter(p, g, n, squeeze=True):
         Optimal filter in frequency domain.
 
     """
+    assert p.shape[0] == g.shape[0]
+
+    if n is None:
+        n = p.shape[0]
+
     p = atleast_2d(p)
     g = atleast_3d(g)
 
@@ -69,8 +76,9 @@ def wiener_filter(x, d, n, g=None, constrained=False):
 
     G = np.fft.fft(g, n=n)
 
+    # NOTE: one could time align the responses here first
     _, Sxd = csd(x, d, nperseg=n, return_onesided=False)
-    _, Sxx = csd(x, x, nperseg=n, return_onesided=False)
+    _, Sxx = welch(x, nperseg=n, return_onesided=False)
 
     if not constrained:
         return - Sxd / Sxx / G
@@ -94,7 +102,7 @@ def wiener_filter(x, d, n, g=None, constrained=False):
     return - np.fft.fft(h * np.fft.ifft(Sxd / F.conj() / Gall), n=n) / (F * Gmin)
 
 
-def multi_channel_wiener_filter(x, d, n, g=None, constrained=False, rho=0, beta=0):
+def multi_channel_wiener_filter(x, d, n, g=None, beta=0):
     """Compute multichannel optimal wiener filter.
 
     From Elliot, Signal Processing for Optimal Control, Eq. 5.3.31
@@ -109,10 +117,6 @@ def multi_channel_wiener_filter(x, d, n, g=None, constrained=False, rho=0, beta=
         Output filter length.
     g : None or array_like, shape (N3[, L[, M]]), optional
         Secondary path impulse response.
-    constrained : bool, optional
-        If True, constrain filter to be causal.
-    rho: float
-        Regularize through control effort weighting.
     beta: float
         Regularize through reference noise.
 
@@ -146,37 +150,4 @@ def multi_channel_wiener_filter(x, d, n, g=None, constrained=False, rho=0, beta=
             _, S = csd(x[:, j], d[:, i], nperseg=n, return_onesided=False)
             Sxd[:, i, j] = S
 
-    if not constrained:
-        return - np.linalg.pinv(G) @ Sxd @ np.linalg.pinv(Sxx + beta * np.identity(Nin))
-
-    def hermtrans(x):
-        return x.conj().transpose([0, 2, 1])
-
-    def spectral_factor(x):
-        c = np.ones((n, 1, 1))
-        c[n // 2:] = 0
-        # half at DC and Nyquist
-        c[0] = 0.5
-        if n % 2 == 0:
-            c[n // 2] = 0.5
-        return np.exp(np.fft.fft(c * np.fft.ifft(np.log(x), axis=0), axis=0))
-
-    # spectral factor of G.H @ G is Gmin.H
-    print(np.log(hermtrans(G) @ G + rho * np.identity(Nout)))
-    Gmin = hermtrans(spectral_factor(hermtrans(G) @ G + rho * np.identity(Nout)))
-
-    from response import Response
-    fig = Response.from_freq(1, Gmin.T).plot()
-    Gmin = spectral_factor(hermtrans(G) @ G + rho * np.identity(Nout))
-    print(Gmin)
-    Response.from_freq(1, Gmin.T).plot(use_fig=fig, show=True, flim=(1e-2, 0.5))
-    Gall = G @ np.linalg.pinv(Gmin)
-
-    # spectral factor if Sxx
-    invF = np.linalg.pinv(spectral_factor(Sxx + beta * np.identity(Nin)))
-
-    h = np.ones((n, 1, 1))
-    h[n // 2:] = 0
-    GhSFinvh = hermtrans(Gall) @ Sxd @ hermtrans(invF)
-    GhSFinvh = np.fft.fft(h * np.fft.ifft(GhSFinvh, axis=0), axis=0)  # remove causal part
-    return - np.linalg.pinv(Gmin) @ GhSFinvh @ invF
+    return - np.linalg.pinv(G) @ Sxd @ np.linalg.pinv(Sxx + beta * np.identity(Nin))

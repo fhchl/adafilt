@@ -126,7 +126,7 @@ class AdaptiveFilter:
                 u[n] = y[n]
 
             # error signal
-            e[n] = d[n] - u[n]
+            e[n] = d[n] + u[n]
 
             self.adapt(fx[n], e[n])
 
