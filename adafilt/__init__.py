@@ -42,10 +42,71 @@ class SimpleFilter:
             Output signal. Has same length as `x`.
 
         """
+        # TODO: take out?
+        return self.filt(x)
+
+    def filt(self, x):
+        """Filter signal x.
+
+        Parameters
+        ----------
+        x : array_like
+            Input signal
+
+        Returns
+        -------
+        y : numpy.ndarray
+            Output signal. Has same length as `x`.
+
+        """
         y, self.zi = olafilt(
             self.w, x, zi=self.zi, sum_inputs=self.sum_inputs, squeeze=self.squeeze
         )
         return y
+
+
+class Delay:
+    """A simple delay."""
+
+    def __init__(self, nsamples, zi=None):
+        """A simple delay.
+
+        Parameters
+        ----------
+        nsamples : int
+            Delay by `nsamples` samples.
+        zi : array_like or None, optional
+            Initial filter condition.
+
+        """
+        self.zi = zi
+        self.nsamples = nsamples
+
+    def filt(self, x, squeeze=True):
+        """Filter signal.
+
+        Parameters
+        ----------
+        x : array_like, shape (N,) or (N, M)
+            Signal with samples along first dimension
+
+        Returns
+        -------
+        numpy.ndarray
+            The filtered signal of shape (N, ) or (N, M)
+
+        """
+        x = atleast_2d(x)
+        nout, nsig = x.shape
+
+        if self.zi is None:
+            # first filtering: fill with zeros
+            self.zi = np.zeros((self.nsamples, nsig))
+
+        zx = np.concatenate((self.zi, x), axis=0)
+        out = zx[:nout]
+        self.zi = zx[nout:]
+        return out.squeeze()
 
 
 class AdaptiveFilter:

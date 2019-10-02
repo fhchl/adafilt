@@ -6,6 +6,8 @@ from scipy.signal import lfilter
 from adafilt.utils import olafilt
 from adafilt.io import FakeInterface
 from adafilt.optimal import wiener_filter
+from adafilt import Delay
+
 
 class TestOlafilt:
     def test_behaves_like_scipy(self):
@@ -243,3 +245,24 @@ class TestOptimal:
 
         h_est = - np.real(np.fft.ifft(wiener_filter(x, y, 256, g=[0, 1], constrained=True)))
         npt.assert_almost_equal([0, 1, 0], h_est[:len(h)], decimal=2)
+
+
+class TestDelay:
+
+    def test_delays_properly(self):
+        ndelay = 10
+        delay = Delay(ndelay)
+        nsamp = 64
+        x = np.arange(1, nsamp + 1)
+
+        y = delay.filt(x)
+        assert y.shape == x.shape
+        npt.assert_array_equal(y, np.concatenate((np.zeros(ndelay), x[:-ndelay])))
+
+        x2 = np.arange(nsamp + 1, nsamp * 2 + 1)
+        y2 = delay.filt(x2)
+
+        x = np.concatenate((x, x2))
+        y = np.concatenate((y, y2))
+
+        npt.assert_array_equal(y[ndelay:], x[:-ndelay])
