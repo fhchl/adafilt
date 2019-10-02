@@ -138,6 +138,7 @@ def multi_channel_wiener_filter(x, d, n, g=None, beta=0):
 
     G = np.fft.fft(g, n=n, axis=0)
 
+    # TODO: align in time during correlation
     Sxx = np.zeros((n, Nin, Nin), dtype=complex)
     for i in range(Nin):
         for j in range(Nin):

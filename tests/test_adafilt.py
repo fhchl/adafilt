@@ -6,6 +6,7 @@ from scipy.signal import lfilter
 from adafilt.utils import olafilt
 from adafilt.io import FakeInterface
 from adafilt.optimal import wiener_filter
+from adafilt import MultiChannelBlockLMS
 from adafilt import Delay
 
 
@@ -266,3 +267,30 @@ class TestDelay:
         y = np.concatenate((y, y2))
 
         npt.assert_array_equal(y[ndelay:], x[:-ndelay])
+
+
+class TestMultiChannelBlockLMS:
+    def test_filt(self):
+        for shape in zip(range(1, 4), range(1, 4)):
+            M, K = shape
+            length = 16
+            blocks = 16
+            blocklength = 16
+            xs = np.random.normal(size=(blocks, blocklength, K))
+            w = np.random.normal(size=(length, M, K))
+            filt = MultiChannelBlockLMS(
+                length=length, blocklength=blocklength, initial_coeff=w, Nin=K, Nout=M
+            )
+
+            # y = w * x
+            y = []
+            for x in xs:
+                y.append(filt.filt(x))
+            y = np.concatenate(y)
+
+            x = np.concatenate(xs)
+            for m in range(M):  # compare each output separately
+                yref = 0
+                for k in range(K):  # sum over reference signal
+                    yref += lfilter(w[:, m, k], 1, x[:, k])
+                npt.assert_almost_equal(y[:, m], yref, err_msg=f"shape: {shape}")

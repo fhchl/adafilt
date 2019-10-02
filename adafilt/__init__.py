@@ -516,37 +516,191 @@ class MultiChannelBlockLMS(AdaptiveFilter):
             self.leakage[length + 1 :] = leakage[:0:-1]  # mirror around nyquist bin
 
         # attributes that reset with reset()
-        self.P = initial_power
-        self.W = np.zeros((nout, nref, 2 * length), dtype=complex)  # shape (nout, 2 * length)
-        self.xfiltbuff = deque(np.zeros(2 * length), maxlen=2 * length)  # shape (nout, 2 * length)
-        self.xadaptbuff = deque(np.zeros(2 * length), maxlen=2 * length)
-        self.eadaptbuff = deque(np.zeros(length), maxlen=length)
+        self.W = np.zeros((2 * length, Nout, Nin), dtype=complex)
+        self.xfiltbuff = deque(  # FIXME not needed_
+            np.zeros((2 * self.num_saved_blocks, blocklength, Nin)),
+            maxlen=2 * self.num_saved_blocks,
+        )
+        self.xadaptbuff = deque(
+            np.zeros((2 * self.num_saved_blocks, blocklength, Nsens, Nout, Nin)),
+            maxlen=2 * self.num_saved_blocks,
+        )
+        self.eadaptbuff = deque(
+            np.zeros((self.num_saved_blocks, blocklength, Nsens)),
+            maxlen=self.num_saved_blocks,
+        )
 
         if initial_coeff is not None:
-            w = np.concatenate((initial_coeff, np.zeros(length)))
+            w = np.concatenate((initial_coeff, np.zeros((length, Nout, Nin))), axis=0)
             self.W[:] = np.fft.fft(w)
 
+        self.zifilt = np.zeros((2 * length - 1, 1))
+
+    @property
+    def w(self):
+        return np.real(np.fft.ifft(self.W)[: self.length])
+
     def filt(self, x):
-        """Filtering step.
+        """Filter reference signal.
 
         Parameters
         ----------
-        x : (blocklength, nref) array_like
+        x : (blocklength, Nin) array_like
             Reference signal.
 
         Returns
         -------
-        y : (blocklength, nour) numpy.ndarray
+        y : (blocklength, Nout) numpy.ndarray
             Filter output.
+
         """
+        x = atleast_2d(x)
         assert x.shape[0] == self.blocklength
-        assert x.shape[1] == self.nref
+        y, self.zifilt = olafilt(self.w, x, zi=self.zifilt, squeeze=False)
+        return y
 
-        self.xfiltbuff.extend(x)
+    def adapt(self, x, e):
+        """Adaptation step.
 
-        # NOTE: X is computed twice per adaptation cycle if filt and adapt are fed with
-        # the same signal. Needed for FxLMS.
-        X = np.fft.fft(self.xfiltbuff, axis=0)  # shape ()
+        If `self.locked == True` perform no adaptation, but fill buffers and estimate
+        power.
 
-        y = np.real(np.fft.ifft(self.W @ X)[-self.blocklength :])
+        Parameters
+        ----------
+        x : (blocklength,) array_like
+            Reference signal.
+        e : (blocklength,) array_like
+            Error signal.
+
+        """
+        assert len(x) == self.blocklength
+        assert len(e) == self.blocklength
+
+        self.xadaptbuff.append(x)
+        self.eadaptbuff.append(e)
+
+        # reference signal in frequency domain
+        # possibly Fx with shape N x Nsens x Nout x Nin
+        # or just   x with shape N x Nin
+        X = np.fft.fft(np.concatenate(self.xadaptbuff), axis=0)
+
+        # error signal in frequency domain
+        E = np.fft.fft(
+            np.concatenate(
+                (np.zeros((self.length, self.Nsens)), np.concatenate(self.eadaptbuff))
+            )
+        )
+
+        # (N, Nout, Nin) = (N, Nsens, Nout, Nin) * (N, Nsens)
+        update = np.einsum("nlmk,nl->nmk", X.conj(), E)
+
+        # filter weight adaptation
+        self.W = self.leakage * self.W - self.stepsize * update
+
+
+class MultiChannelBlockFxLMS(AdaptiveFilter):
+    """A multi-channel block filtered-reference least-mean-squared adaptive filter.
+
+    Based on """
+
+    def __init__(
+        self,
+        Nout=1,
+        Nin=1,
+        Nsens=1,
+        g=None,
+        length=32,
+        blocklength=32,
+        stepsize=0.001,
+        leakage=1,
+        power_averaging=0.5,
+        initial_coeff=None,
+        constrained=True,
+    ):
+        """Create multi-channel block-wise LMS adaptive filter object."""
+        # TODO: test me
+        assert length >= blocklength, "Filter must be at least as long as block"
+        assert length % blocklength == 0
+
+        self.Nin, self.Nout, self.Nsens = Nin, Nout, Nsens
+        self.length = length
+        self.blocklength = blocklength
+        self.num_saved_blocks = length // blocklength
+        self.stepsize = stepsize
+        self.constrained = constrained
+        self.leakage = leakage
+
+        self.W = np.zeros((2 * length, Nout, Nin), dtype=complex)
+
+        self.xbuff = deque(
+            np.zeros((2 * self.num_saved_blocks, blocklength, Nin)),
+            maxlen=2 * self.num_saved_blocks,
+        )
+
+        self.ebuff = deque(
+            np.zeros((self.num_saved_blocks, blocklength, Nsens)),
+            maxlen=self.num_saved_blocks,
+        )
+
+        if initial_coeff is not None:
+            self.W[:] = np.fft.fft(initial_coeff, axis=0, n=2 * length)
+
+        if g is None:
+            self.G = np.ones((2 * length, Nsens, Nout))
+        else:
+            assert g.shape[1] == Nsens and g.shape[2] == Nout
+            self.G = np.fft.fft(g, axis=0, n=2 * length)
+
+    @property
+    def w(self):
+        """Adaptive filter weights with shape (length, Nout, Nin)."""
+        return np.real(np.fft.ifft(self.W, axis=0)[: self.length])
+
+    def adafilt(self, x, e):
+        """Adapt filter and return adapted filter output.
+
+        Parameters
+        ----------
+        x : (blocklength, Nin) array_like
+            Reference signal.
+        e : (blocklength, Nsens) array_like
+            Error signal.
+
+        Returns
+        -------
+        y : (blocklength, Nout) numpy.ndarray
+            Filter output.
+
+        """
+        assert x.shape[0] == self.blocklength and x.shape[1] == self.Nin
+        assert e.shape[0] == self.blocklength and e.shape[1] == self.Nsens
+
+        self.xbuff.append(x)
+        self.ebuff.append(e)
+
+        X = np.fft.fft(np.concatenate(self.xadaptbuff), axis=0)
+        E = np.fft.fft(
+            np.concatenate(
+                (np.zeros((self.length, self.Nsens)), np.concatenate(self.ebuff))
+            ),
+            axis=0,
+        )
+        update = (
+            self.G.conj().transpose([0, 2, 1]) @ E[..., None] @ X.conj()[:, None, :]
+        )
+
+        if self.constrained:
+            # make it causal
+            ut = np.real(np.fft.ifft(update, axis=0))
+            ut[self.length :] = 0
+            update = np.fft.fft(ut, axis=0)
+
+        # update filter
+        self.W = self.leakage * self.W - self.stepsize * update
+
+        # filter output
+        y = np.real(np.fft.ifft(self.W @ X[..., None], axis=0))[
+            -self.blocklength :, :, 0
+        ]
+
         return y

@@ -44,29 +44,30 @@ def olafilt(b, x, zi=None, squeeze=True, sum_inputs=True):
 
     Parameters
     ----------
-    b : array_like, shape (m, [L, [M]] )
-        The impulse response of the filter matrix.
-    x : array_like, shape (n, [K])
-        Signal to be filtered.
-    zi : array_like, shape (m - 1, [L[, M, [K]]]), optional
+    b : array_like, shape (m[, L[, M]] )
+        The impulse response of the filter matrix with `L` outputs and `M` inputs.
+    x : array_like, shape (n[, K])
+        `K` signals to be filtered.
+    zi : array_like, shape (m - 1[, L[, M[, K]]]), optional
         Initial condition of the filter, but in reality just the
-        runout of the previous computation.  If `zi` is None or not
-        given, then zero initial state is assumed.
+        runout of the previous computation.  If `zi` is None (default), then zero
+        initial state is assumed.
     squeeze : bool, optional
         If `True`, squeeze dimensions from output arrays.
     sum_inputs : bool, optional
         If `True`, sum the result over all inputs, assuming `M == K`. If `False`, return
-        all possible combinations of filtering x with the filters in b without summing.
+        all possible combinations of filtering `x` with the filters `b` without summing.
+
 
     Returns
     -------
     y : numpy.ndarray
-        The output of the digital filter. Has shape (n, [L]), if `sum_inputs==True`,
-        else shape (n, [L[, M, [K]]]).
+        The output of the digital filter. Has shape (n[, L]), if `sum_inputs==True`,
+        else shape (n[, L[, M[, K]]]).
     zf : numpy.ndarray
         If `zi` is None, this is not returned, otherwise, `zf` holds the
-        final filter state. Has shape (m - 1, [L]), if `sum_inputs=True`, else shape
-        (m - 1, [L[, M, [K]]]).
+        final filter state. Has shape (m - 1[, L]), if `sum_inputs=True`, else shape
+        (m - 1[, L[, M[, K]]]).
 
     Notes
     -----
