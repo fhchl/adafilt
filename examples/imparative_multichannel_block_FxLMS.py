@@ -26,7 +26,7 @@ x = np.random.normal(size=(nblocks * blocklength, Nin))  # reference signal
 d = olafilt(h_pri, x)  # disturbance
 
 # optimal wiener filter
-Wiener = multi_channel_wiener_filter(x, d, length, h_sec, constrained=False)
+Wiener = multi_channel_wiener_filter(x, d, length, h_sec)
 
 plt.figure()
 plt.title("Wiener solution")
@@ -66,8 +66,8 @@ for i in range(nblocks):
     y = np.real(np.fft.ifft(W @ X[..., None], axis=0))[-blocklength:, :, 0]
 
     # acoustic paths and summing at error mic
-    d, zi_pri = olafilt(h_pri, x, zi=zi_pri, squeeze=False, sum_inputs=True)
-    u, zi_sec = olafilt(h_sec, y, zi=zi_sec, squeeze=False, sum_inputs=True)
+    d, zi_pri = olafilt(h_pri, x, zi=zi_pri, sum_inputs=True)
+    u, zi_sec = olafilt(h_sec, y, zi=zi_sec, sum_inputs=True)
     e = d + u
     ebuff.append(e)
 

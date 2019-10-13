@@ -6,8 +6,7 @@ from scipy.signal import lfilter
 from adafilt.utils import olafilt
 from adafilt.io import FakeInterface
 from adafilt.optimal import wiener_filter
-from adafilt import MultiChannelBlockLMS
-from adafilt import Delay
+from adafilt import MultiChannelBlockLMS, Delay, SimpleFilter
 
 
 class TestOlafilt:
@@ -27,28 +26,6 @@ class TestOlafilt:
         assert np.array_equal(zi.shape, zfola.shape)
         assert np.array_equal(zi.shape, zf.shape)
 
-    def test_many_to_many(self):
-        m = 123
-        n = 1024
-        K, L = (5, 7)
-        x = np.random.random((n, K))
-        h = np.random.random((m, L, K))
-        zi = np.random.random((m - 1, L, K))
-        zj = np.sum(zi, axis=-1)
-
-        yola, zfola = olafilt(h, x, zi=zj, squeeze=False)
-
-        y = np.zeros((n, L))
-        zf = np.zeros((m - 1, L))
-        for o in range(L):
-            for i in range(K):
-                yt, zft = lfilter(h[:, o, i], 1, x[:, i], zi=zi[:, o, i])
-                y[:, o] += yt
-                zf[:, o] += zft
-
-        npt.assert_almost_equal(y, yola)
-        npt.assert_almost_equal(zf, zfola)
-
     def test_multiple_outputs(self):
         m = 123
         n = 1024
@@ -58,29 +35,84 @@ class TestOlafilt:
         zi = np.random.random((m - 1, L))
 
         yola, zfola = olafilt(h, x, zi=zi)
-        for o in range(L):
-            y, zf = lfilter(h[:, o], 1, x, zi=zi[:, o])
-            npt.assert_almost_equal(y, yola[:, o])
-            npt.assert_almost_equal(zf, zfola[:, o])
+        for l in range(L):
+            y, zf = lfilter(h[:, l], 1, x, zi=zi[:, l])
+            npt.assert_almost_equal(y, yola[:, l])
+            npt.assert_almost_equal(zf, zfola[:, l])
+
+    def test_nozi_multiple_inputs(self):
+        m = 123
+        n = 1024
+        L, M = (1, 3)
+        x = np.random.random((n,))
+        h = np.random.random((m, L, M))
+
+        yola = olafilt(h, x, zi=None)
+        y = 0
+        for m in range(M):
+            yt = lfilter(h[:, 0, m], 1, x, zi=None)
+            y += yt
+
+        npt.assert_almost_equal(y, yola[:, 0])
 
     def test_multiple_inputs(self):
         m = 123
         n = 1024
-        L, K = (1, 3)
-        x = np.random.random((n, K))
-        h = np.random.random((m, L, K))
+        L, M = (1, 3)
+        x = np.random.random((n,))
+        h = np.random.random((m, L, M))
         zi = np.random.random((m - 1, L))
 
         yola, zfola = olafilt(h, x, zi=zi)
         y = 0
         zf = 0
-        for i in range(K):
-            yt, zft = lfilter(h[:, 0, i], 1, x[:, i], zi=zi[:, 0] / K)
+        for m in range(M):
+            yt, zft = lfilter(h[:, 0, m], 1, x, zi=zi[:, 0] / M)
             y += yt
             zf += zft
 
-        npt.assert_almost_equal(zf, zfola)
+        npt.assert_almost_equal(zf, zfola[:, 0])
+        npt.assert_almost_equal(y, yola[:, 0])
+
+    def test_nozi_many_to_many(self):
+        m = 123
+        n = 1024
+        L, M = (10, 5)
+
+        x = np.random.random((n,))
+        h = np.random.random((m, L, M))
+
+        yola = olafilt(h, x, zi=None, sum_inputs=True)
+
+        y = np.zeros((n, L))
+        for l in range(L):
+            for m in range(M):
+                yt = lfilter(h[:, l, m], 1, x, zi=None)
+                y[:, l] += yt
+
         npt.assert_almost_equal(y, yola)
+
+    def test_many_to_many(self):
+        m = 123
+        n = 1024
+        L, M = (10, 5)
+
+        x = np.random.random((n,))
+        h = np.random.random((m, L, M))
+        zi = np.random.random((m - 1, L))
+
+        yola, zfola = olafilt(h, x, zi=zi, sum_inputs=True)
+
+        y = np.zeros((n, L))
+        zf = np.zeros((m - 1, L))
+        for l in range(L):
+            for m in range(M):
+                yt, zft = lfilter(h[:, l, m], 1, x, zi=zi[:, l] / M)
+                y[:, l] += yt
+                zf[:, l] += zft
+
+        npt.assert_almost_equal(y, yola)
+        npt.assert_almost_equal(zf, zfola)
 
     def test_does_not_modify_inputs(self):
         m = 123
@@ -108,7 +140,7 @@ class TestOlafilt:
         h = np.random.random((m, L, M))
         zi = np.random.random((m - 1, L, M, K))
 
-        yola, zfola = olafilt(h, x, zi=zi, squeeze=False, sum_inputs=False)
+        yola, zfola = olafilt(h, x, zi=zi, sum_inputs=False)
 
         y = np.zeros((n, L))
         zf = np.zeros((m - 1, L))
@@ -127,7 +159,7 @@ class TestOlafilt:
             h = np.random.random((m, L, M))
             zi = np.random.random((m - 1, L, M, K))
 
-            yola, zfola = olafilt(h, x, zi=zi, squeeze=False, sum_inputs=False)
+            yola, zfola = olafilt(h, x, zi=zi, sum_inputs=False)
 
             y = np.zeros((n, L))
             zf = np.zeros((m - 1, L))
@@ -185,7 +217,7 @@ class TestIO:
         h_pri = [0, 0, 0, 0, 1, 0, 1]  # primary path impulse response
         h_sec = [0, 0, 1, 0.5]
         buffsize = 16
-        buffers = 100
+        buffers = 500
         signal = np.random.normal(0, 1, size=buffers * buffsize)
         sim = FakeInterface(buffsize, signal, h_pri=h_pri, h_sec=h_sec)
         sim = FakeInterface(buffsize, signal, h_pri=h_pri, h_sec=h_sec)

@@ -34,7 +34,23 @@ def atleast_3d(a):
     return result
 
 
-def olafilt(b, x, zi=None, squeeze=True, sum_inputs=True):
+def atleast_4d(a):
+    """Similar to numpy.atleast_3d, but always appends new axis."""
+    a = np.asanyarray(a)
+    if a.ndim == 0:
+        result = a.reshape(1, 1, 1, 1)
+    elif a.ndim == 1:
+        result = a[:, np.newaxis, np.newaxis, np.newaxis]
+    elif a.ndim == 2:
+        result = a[..., np.newaxis, np.newaxis]
+    elif a.ndim == 3:
+        result = a[..., np.newaxis]
+    else:
+        result = a
+    return result
+
+
+def olafilt(b, x, zi=None, sum_inputs=True):
     """Filter a multi dimensional array with an FIR filter matrix.
 
     Filter a data sequence, `x`, using a FIR filter given in `b`.
@@ -52,8 +68,6 @@ def olafilt(b, x, zi=None, squeeze=True, sum_inputs=True):
         Initial condition of the filter, but in reality just the
         runout of the previous computation.  If `zi` is None (default), then zero
         initial state is assumed.
-    squeeze : bool, optional
-        If `True`, squeeze dimensions from output arrays.
     sum_inputs : bool, optional
         If `True`, sum the result over all inputs, assuming `M == K`. If `False`, return
         all possible combinations of filtering `x` with the filters `b` without summing.
@@ -75,46 +89,69 @@ def olafilt(b, x, zi=None, squeeze=True, sum_inputs=True):
 
     """
     # bring into broadcasting shape
-    b = atleast_3d(b)
-    x = atleast_2d(x)
+    b = np.asarray(b)
+    x = np.asarray(x)
 
-    L_I, L, M = b.shape
-    _, K = x.shape
+    L_I = b.shape[0]
+    L_sig = x.shape[0]
 
     # find power of 2 larger that 2*L_I (from abarnert on Stackoverflow)
-    L_F = 2 << (L_I - 1).bit_length()  # FFT Size
+    L_F = int(2 << (L_I - 1).bit_length())  # FFT Size
     L_S = L_F - L_I + 1  # length of segments
-    L_sig = x.shape[0]
     offsets = range(0, L_sig, L_S)
-    shape = (L_sig + L_F, L) if sum_inputs else (L_sig + L_F, L, M, K)
+
+    # compute output shape
+    if b.ndim == 1:
+        bsig = "n"
+    elif b.ndim == 2:
+        bsig = "nl"
+    elif b.ndim == 3:
+        bsig = "nlm"
+    else:
+        raise ValueError("b must not have more than 3 dimensions")
+
+    if x.ndim == 1:
+        xsig = "n"
+    elif x.ndim == 2:
+        xsig = "nk"
+    else:
+        raise ValueError("x must not have more than 2 dimensions")
+
+    outsig = "n" + bsig[1:] + xsig[1:]
+    outshape = [L_sig + L_F] + list(b.shape[1:]) + list(x.shape[1:])
+
+    if sum_inputs:
+        outsig = outsig.replace("m", "")
+        outsig = outsig.replace("k", "")
+        if "m" in bsig:
+            outshape.pop(2)
+        if "k" in xsig:
+            outshape.pop(-1)
 
     # handle complex or real input
     if np.iscomplexobj(b) or np.iscomplexobj(x):
         fft_func = np.fft.fft
         ifft_func = np.fft.ifft
-        res = np.zeros(shape, dtype=np.complex128)
+        res = np.zeros(outshape, dtype=np.complex128)
     else:
         fft_func = np.fft.rfft
         ifft_func = np.fft.irfft
-        res = np.zeros(shape)
+        res = np.zeros(outshape)
 
     B = fft_func(b, n=L_F, axis=0)
 
     # overlap and add
-    signature = 'nlm,nm->nl' if sum_inputs else 'nlm,nk->nlmk'
     for n in offsets:
         Xseg = fft_func(x[n : n + L_S], n=L_F, axis=0)
-        res[n : n + L_F] += ifft_func(np.einsum(signature, B , Xseg), axis=0)
+        res[n : n + L_F] += ifft_func(
+            np.einsum(f"{bsig},{xsig}->{outsig}", B, Xseg), axis=0
+        )
 
     if zi is not None:
-        zi = atleast_2d(zi)
         res[: zi.shape[0]] = res[: zi.shape[0]] + zi
-        y = res[:L_sig]
-        zf = res[L_sig : L_sig + L_I - 1]
-        return (y.squeeze(), zf.squeeze()) if squeeze else (y, zf)
-    else:
-        y = res[:L_sig]
-        return y.squeeze() if squeeze else y
+        return res[:L_sig], res[L_sig : L_sig + L_I - 1]
+
+    return res[:L_sig]
 
 
 def wgn(x, snr, unit=None):

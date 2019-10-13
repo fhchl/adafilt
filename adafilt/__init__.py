@@ -3,13 +3,13 @@
 import numpy as np
 from collections import deque
 
-from adafilt.utils import olafilt, atleast_2d
+from adafilt.utils import olafilt, atleast_2d, atleast_4d
 
 
 class SimpleFilter:
     """A overlap-and-add Filter."""
 
-    def __init__(self, w, sum_inputs=True, squeeze=True):
+    def __init__(self, w, sum_inputs=True):
         """Create overlap-add filter object.
 
         Parameters
@@ -21,7 +21,6 @@ class SimpleFilter:
         w = np.asarray(w)
         self.w = w
         self.sum_inputs = sum_inputs
-        self.squeeze = squeeze
 
         if sum_inputs:
             self.zi = np.zeros((w.shape[0] - 1, 1))
@@ -59,9 +58,7 @@ class SimpleFilter:
             Output signal. Has same length as `x`.
 
         """
-        y, self.zi = olafilt(
-            self.w, x, zi=self.zi, sum_inputs=self.sum_inputs, squeeze=self.squeeze
-        )
+        y, self.zi = olafilt(self.w, x, zi=self.zi, sum_inputs=self.sum_inputs)
         return y
 
 
@@ -82,7 +79,7 @@ class Delay:
         self.zi = zi
         self.nsamples = nsamples
 
-    def filt(self, x, squeeze=True):
+    def filt(self, x):
         """Filter signal.
 
         Parameters
@@ -96,6 +93,7 @@ class Delay:
             The filtered signal of shape (N, ) or (N, M)
 
         """
+        x_orig_shape = x.shape
         x = atleast_2d(x)
         nout, nsig = x.shape
 
@@ -106,7 +104,7 @@ class Delay:
         zx = np.concatenate((self.zi, x), axis=0)
         out = zx[:nout]
         self.zi = zx[nout:]
-        return out.squeeze()
+        return out.reshape(x_orig_shape)
 
 
 class AdaptiveFilter:
