@@ -9,38 +9,26 @@ from adafilt.utils import olafilt, atleast_2d, atleast_4d
 class SimpleFilter:
     """A overlap-and-add Filter."""
 
-    def __init__(self, w, sum_inputs=True):
+    def __init__(self, w, zi=None, sum_inputs=True):
         """Create overlap-add filter object.
 
         Parameters
         ----------
         w : array_like
             Filter taps.
+        zi : None or array_like, optional
+            Initial filter state.
+        sum_inputs : bool, optional
+            If `True`, sum over inputs and outputs at each error channel.
 
         """
         w = np.asarray(w)
         self.w = w
         self.sum_inputs = sum_inputs
-
-        if sum_inputs:
-            self.zi = np.zeros((w.shape[0] - 1, 1))
-        else:
-            self.zi = np.zeros((w.shape[0] - 1, 1, 1, 1))
+        self.zi = zi if zi is not None else 0
 
     def __call__(self, x):
-        """Filter signal x.
-
-        Parameters
-        ----------
-        x : array_like
-            Input signal
-
-        Returns
-        -------
-        y : numpy.ndarray
-            Output signal. Has same length as `x`.
-
-        """
+        """See `SimpleFilter.filt`."""
         # TODO: take out?
         return self.filt(x)
 
@@ -66,7 +54,7 @@ class Delay:
     """A simple delay."""
 
     def __init__(self, nsamples, zi=None):
-        """A simple delay.
+        """Create simple delay.
 
         Parameters
         ----------
@@ -78,6 +66,10 @@ class Delay:
         """
         self.zi = zi
         self.nsamples = nsamples
+
+    def __call__(self, x):
+        """See `Delay.filt`."""
+        return self.filt(x)
 
     def filt(self, x):
         """Filter signal.
