@@ -239,7 +239,7 @@ class TestSimpleFilter:
         npt.assert_almost_equal(y, x)
 
 
-class TestIO:
+class TestFakeInterface:
     def test_FakeInterface_output(self):
 
         h_pri = np.random.normal(0, 1, 5)
@@ -274,6 +274,45 @@ class TestIO:
         npt.assert_almost_equal(d, olafilt(h_pri, x))
         npt.assert_almost_equal(u, olafilt(h_sec, y))
         npt.assert_almost_equal(e, u + d)
+
+    def test_FakeInterface_output_multichannel(self):
+        L, M, K = 10, 5, 3
+        npri = 1024
+        nsec = 512
+        h_pri = np.random.normal(size=(npri, L, K))
+        h_sec = np.random.normal(size=(nsec, L, M))
+
+        buffsize = 16
+        buffers = 100
+        signal = np.random.normal(size=(buffers * buffsize, K))
+        noise = np.random.normal(size=(buffers * buffsize, L))
+        sim = FakeInterface(buffsize, signal, noise=noise, h_pri=h_pri, h_sec=h_sec)
+
+        ys = []
+        xs = []
+        es = []
+        us = []
+        ds = []
+
+        for i in range(buffers):
+            y = np.random.normal(size=buffsize)
+            x, e, u, d = sim.playrec(y, send_signal=True)
+            ys.append(y)
+            xs.append(x)
+            es.append(e)
+            ds.append(d)
+            us.append(u)
+
+        y = np.concatenate(ys)
+        x = np.concatenate(xs)
+        e = np.concatenate(es)
+        u = np.concatenate(us)
+        d = np.concatenate(ds)
+
+        assert np.all(x == signal)
+        npt.assert_almost_equal(d, olafilt(h_pri, x))
+        npt.assert_almost_equal(u, olafilt(h_sec, y))
+        npt.assert_almost_equal(e, u + d + noise)
 
     def test_FakeInterface_filtering(self):
         h_pri = [0, 0, 0, 0, 1, 0, 1]  # primary path impulse response
