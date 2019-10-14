@@ -61,13 +61,14 @@ class TestOlafilt:
         L, M = (1, 3)
         x = np.random.random((n,))
         h = np.random.random((m, L, M))
-        zi = np.random.random((m - 1, L))
+        ziall = np.random.random((m - 1, L, M))
+        zi = ziall.sum(axis=-1)
 
         yola, zfola = olafilt(h, x, zi=zi)
         y = 0
         zf = 0
         for m in range(M):
-            yt, zft = lfilter(h[:, 0, m], 1, x, zi=zi[:, 0] / M)
+            yt, zft = lfilter(h[:, 0, m], 1, x, zi=ziall[:, 0, m])
             y += yt
             zf += zft
 
@@ -99,15 +100,15 @@ class TestOlafilt:
 
         x = np.random.random((n,))
         h = np.random.random((m, L, M))
-        zi = np.random.random((m - 1, L))
-
+        ziall = np.random.random((m - 1, L, M))
+        zi = ziall.sum(axis=-1)
         yola, zfola = olafilt(h, x, zi=zi, sum_inputs=True)
 
         y = np.zeros((n, L))
         zf = np.zeros((m - 1, L))
         for l in range(L):
             for m in range(M):
-                yt, zft = lfilter(h[:, l, m], 1, x, zi=zi[:, l] / M)
+                yt, zft = lfilter(h[:, l, m], 1, x, zi=ziall[:, l, m])
                 y[:, l] += yt
                 zf[:, l] += zft
 
@@ -175,6 +176,67 @@ class TestOlafilt:
         Ks = range(1, 4)
 
         [test_shape(L, M, K) for L in Ls for M in Ms for K in Ks]
+
+    def test_works_with_any_input_shape_summed_no_zi(self):
+        def test_shape(L, M, K):
+            m = 123
+            n = 1024
+            x = np.random.random((n, K))
+            h = np.random.random((m, L, M))
+
+            yola = olafilt(h, x, zi=None, sum_inputs=True)
+
+            for l in range(L):
+                y = 0
+                for m in range(M):
+                    for k in range(K):
+                        y += lfilter(h[:, l, m], 1, x[:, k], zi=None)
+                npt.assert_almost_equal(y, yola[:, l], err_msg=f'{L, M, K}')
+
+        Ls = range(1, 4)
+        Ms = range(1, 4)
+        Ks = range(1, 4)
+
+        [test_shape(L, M, K) for L in Ls for M in Ms for K in Ks]
+
+    def test_works_with_any_input_shape_summed(self):
+        def test_shape(L, M, K):
+            m = 123
+            n = 1024
+            x = np.random.random((n, K))
+            h = np.random.random((m, L, M))
+            ziall = np.random.random((m - 1, L, M, K))
+            zi = ziall.sum(axis=(-1, -2))
+
+            yola, zfola = olafilt(h, x, zi=zi, sum_inputs=True)
+
+            for l in range(L):
+                y = 0
+                zf = 0
+                for m in range(M):
+                    for k in range(K):
+                        yt, zft = lfilter(h[:, l, m], 1, x[:, k], zi=ziall[:, l, m, k])
+                        y += yt
+                        zf += zft
+                npt.assert_almost_equal(y, yola[:, l], err_msg=f'{L, M, K}')
+                npt.assert_almost_equal(zf, zfola[:, l], err_msg=f'{L, M, K}')
+
+        Ls = range(1, 4)
+        Ms = range(1, 4)
+        Ks = range(1, 4)
+
+        [test_shape(L, M, K) for L in Ls for M in Ms for K in Ks]
+
+
+
+class TestSimpleFilter:
+    def test_output_shape_1x1(self):
+        h = [1, 0, 0]
+        filt = SimpleFilter(h, sum_inputs=True)
+        x = np.random.normal(size=100)
+        y = filt.filt(x)
+        assert x.shape == (100,)
+        npt.assert_almost_equal(y, x)
 
 
 class TestIO:
@@ -249,39 +311,39 @@ class TestIO:
 
         h_sec_meas = np.fft.irfft(np.fft.rfft(us) / np.fft.rfft(ys))[:10]
 
-        npt.assert_almost_equal(h_pri_meas[:len(h_pri)], h_pri, decimal=2)
-        npt.assert_almost_equal(h_sec_meas[:len(h_sec)], h_sec, decimal=2)
+        npt.assert_almost_equal(h_pri_meas[: len(h_pri)], h_pri, decimal=2)
+        npt.assert_almost_equal(h_sec_meas[: len(h_sec)], h_sec, decimal=2)
 
 
 class TestOptimal:
-
     def test_wiener_filter_unconstrained_causal(self):
         h = [1, -1, 0.5]
-        x = np.random.random(2**14)
+        x = np.random.random(2 ** 16)
         y = olafilt(h, x)
 
-        h_est = - np.real(np.fft.ifft(wiener_filter(x, y, 32, constrained=False)))
-        npt.assert_almost_equal(h, h_est[:len(h)], decimal=2)
+        h_est = -np.real(np.fft.ifft(wiener_filter(x, y, 32, constrained=False)))
+        npt.assert_almost_equal(h, h_est[: len(h)], decimal=2)
 
     def test_wiener_filter_constrained_causal(self):
         h = [1, -1, 0.5]
-        x = np.random.random(2**14)
+        x = np.random.random(2 ** 16)
         y = olafilt(h, x)
 
-        h_est = - np.real(np.fft.ifft(wiener_filter(x, y, 32, constrained=True)))
-        npt.assert_almost_equal(h, h_est[:len(h)], decimal=2)
+        h_est = -np.real(np.fft.ifft(wiener_filter(x, y, 32, constrained=True)))
+        npt.assert_almost_equal(h, h_est[: len(h)], decimal=2)
 
     def test_wiener_filter_constrained_noncausal(self):
         h = [1, 0, 1]
-        x = np.random.random(2**15)
+        x = np.random.random(2 ** 16)
         y = olafilt(h, x)
 
-        h_est = - np.real(np.fft.ifft(wiener_filter(x, y, 256, g=[0, 1], constrained=True)))
-        npt.assert_almost_equal([0, 1, 0], h_est[:len(h)], decimal=2)
+        h_est = -np.real(
+            np.fft.ifft(wiener_filter(x, y, 256, g=[0, 1], constrained=True))
+        )
+        npt.assert_almost_equal([0, 1, 0], h_est[: len(h)], decimal=2)
 
 
 class TestDelay:
-
     def test_delays_properly(self):
         ndelay = 10
         delay = Delay(ndelay)
@@ -303,26 +365,47 @@ class TestDelay:
 
 class TestMultiChannelBlockLMS:
     def test_filt(self):
-        for shape in zip(range(1, 4), range(1, 4)):
-            M, K = shape
+        for (L, M, K) in [
+            (L, M, K) for L in range(1, 4) for M in range(1, 4) for K in range(1, 4)
+        ]:
+            print((L, M, K))
             length = 16
             blocks = 16
             blocklength = 16
+            w = np.random.normal(size=(length, L, M))
             xs = np.random.normal(size=(blocks, blocklength, K))
-            w = np.random.normal(size=(length, M, K))
+            x = np.concatenate(xs)
+
             filt = MultiChannelBlockLMS(
-                length=length, blocklength=blocklength, initial_coeff=w, Nin=K, Nout=M
+                length=length,
+                blocklength=blocklength,
+                initial_coeff=w,
+                Nin=K,
+                Nout=M,
+                Nsens=L,
             )
 
-            # y = w * x
+            # w set correctly
+            npt.assert_almost_equal(w, filt.w)
+
+            # single block works
+            npt.assert_almost_equal(olafilt(w, xs[0]), filt.filt(xs[0]))
+
+            filt.zifilt = 0  # reset
+
+            # many nlocks work
             y = []
-            for x in xs:
-                y.append(filt.filt(x))
+            for xb in xs:
+                xb_copy = xb.copy()
+                y.append(filt.filt(xb))
+                assert np.array_equal(xb_copy, xb)
             y = np.concatenate(y)
 
-            x = np.concatenate(xs)
-            for m in range(M):  # compare each output separately
-                yref = 0
-                for k in range(K):  # sum over reference signal
-                    yref += lfilter(w[:, m, k], 1, x[:, k])
-                npt.assert_almost_equal(y[:, m], yref, err_msg=f"shape: {shape}")
+            npt.assert_almost_equal(olafilt(w, x), y)
+            yref = np.zeros(y.shape)
+            for l in range(L):
+                for m in range(M):
+                    for k in range(K):
+                        yref[:, l] += lfilter(w[:, l, m], 1, x[:, k])
+
+            npt.assert_almost_equal(y, yref, err_msg=f"shape: {(L, M, K)}")
