@@ -9,22 +9,23 @@ from adafilt.utils import olafilt, atleast_2d, atleast_4d
 class SimpleFilter:
     """A overlap-and-add Filter."""
 
-    def __init__(self, w, zi=None, sum_inputs=True):
+    def __init__(self, w, subscripts=None, zi=None):
         """Create overlap-add filter object.
 
         Parameters
         ----------
         w : array_like
             Filter taps.
+        subscripts: str or none, optional
+            Defines multi-channel case with `numpy.einsum` notation. See
+            `adafilt.utils.olafilt` for details.
         zi : None or array_like, optional
             Initial filter state.
-        sum_inputs : bool, optional
-            If `True`, sum over inputs and outputs at each error channel.
 
         """
         w = np.asarray(w)
         self.w = w
-        self.sum_inputs = sum_inputs
+        self.subscripts = subscripts
         self.zi = zi if zi is not None else 0
 
     def __call__(self, x):
@@ -43,10 +44,10 @@ class SimpleFilter:
         Returns
         -------
         y : numpy.ndarray
-            Output signal. Has same length as `x`.
+            Output signal with `y.shape[0] == x.shape[0]`.
 
         """
-        y, self.zi = olafilt(self.w, x, zi=self.zi, sum_inputs=self.sum_inputs)
+        y, self.zi = olafilt(self.w, x, subscripts=self.subscripts, zi=self.zi)
         return y
 
 

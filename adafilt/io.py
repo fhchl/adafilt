@@ -40,22 +40,24 @@ class FakeInterface:
         self._orig_noise = noise
         self.nblocks = signal.shape[0] // blocklength
 
+        if signal is None:
+            signal = np.zeros((blocklength, *h_pri.shape[1:2]))
+
         # check correct h shapes
-        assert (h_pri.ndim > 1) == (h_sec.ndim > 1)
         if not cycle_h:
             # cycle through one element
             h_pri = h_pri[None]
             h_sec = h_sec[None]
-        self._orig_h_pri = h_pri
-        self._orig_h_sec = h_sec
+        assert (h_pri.ndim > 2) == (h_sec.ndim > 2)
 
         # check correct signal shape
         assert signal.ndim in [1, 2]
         assert (signal.ndim == 2 and h_pri.ndim == 4) or (
             signal.ndim == 1 and h_pri.ndim in [2, 3]
-        ), "Incompatible signal and h_pri shapes"
-        if signal is None:
-            signal = np.zeros((blocklength, *h_pri.shape[1:2]))
+        ), (
+            "Incompatible signal (n,[ K]) and h_pri (m, [L, [K]]) shapes:"
+            + f"{signal.shape}, {h_pri.shape}"
+        )
 
         # check correct noise shape
         if noise is not None:
@@ -66,6 +68,9 @@ class FakeInterface:
             ), "Incompatible noise and h_pri shapes"
         else:
             self.noise = None
+
+        self._orig_h_pri = h_pri
+        self._orig_h_sec = h_sec
 
         self.reset()
 
@@ -105,11 +110,24 @@ class FakeInterface:
         else:
             x = np.zeros((self.blocklength, *self._orig_signal.shape[1:2]))
 
+        subscripts_sec = (
+            "nlm"[: self._orig_h_pri.ndim - 1] + "," + "nm"[: y.ndim] + "->n"
+        )
+        subscripts_pri = (
+            "nlk"[: self._orig_h_pri.ndim - 1]
+            + ","
+            + "nk"[: self._orig_signal.ndim]
+            + "->n"
+        )
+        if self._orig_h_sec.ndim - 1 > 1:
+            subscripts_sec += "l"
+            subscripts_pri += "l"
+
         d, self._zi_pri = olafilt(
-            next(self.h_pri), x, zi=self._zi_pri
+            next(self.h_pri), x, subscripts_pri, zi=self._zi_pri
         )  # primary path signal at error mic
         u, self._zi_sec = olafilt(
-            next(self.h_sec), y, zi=self._zi_sec
+            next(self.h_sec), y, subscripts_sec, zi=self._zi_sec
         )  # secondary path signal at error mic
 
         e = d + u  # error signal

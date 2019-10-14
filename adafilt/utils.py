@@ -50,7 +50,31 @@ def atleast_4d(a):
     return result
 
 
-def olafilt(b, x, zi=None, sum_inputs=True):
+def einsum_outshape(subscripts, *operants):
+    """Compute the shape of output from `numpy.einsum`.
+
+    Does not support ellipses.
+
+    """
+    if "." in subscripts:
+        raise ValueError(f'Ellipses are not supported: {subscripts}')
+
+    insubs, outsubs = subscripts.replace(",", "").split("->")
+    if outsubs == "":
+        return ()
+    insubs = np.array(list(insubs))
+    innumber = np.concatenate([op.shape for op in operants])
+    outshape = []
+    for o in outsubs:
+        indices, = np.where(insubs == o)
+        try:
+            outshape.append(innumber[indices].max())
+        except ValueError:
+            raise ValueError(f'Invalid subscripts: {subscripts}')
+    return tuple(outshape)
+
+
+def olafilt(b, x, subscripts=None, zi=None):
     """Filter a multi dimensional array with an FIR filter matrix.
 
     Filter a data sequence, `x`, using a FIR filter given in `b`.
@@ -58,39 +82,44 @@ def olafilt(b, x, zi=None, sum_inputs=True):
     into frequency domain first.  The FFT size is determined as the
     next higher power of 2 of twice the length of `b`.
 
+    Multi-channel fitering is support via `numpy.einsum` notation.
+
     Parameters
     ----------
-    b : array_like, shape (m[, L[, M]] )
-        The impulse response of the filter matrix with `L` outputs and `M` inputs.
-    x : array_like, shape (n[, K])
-        `K` signals to be filtered.
-    zi : array_like, shape (m - 1[, L[, M[, K]]]), optional
-        Initial condition of the filter, but in reality just the
-        runout of the previous computation.  If `zi` is None (default), then zero
-        initial state is assumed.
-    sum_inputs : bool, optional
-        If `True`, sum the result over all inputs, assuming `M == K`. If `False`, return
-        all possible combinations of filtering `x` with the filters `b` without summing.
-
+    b : array_like, shape (m[, ...])
+        Filter matrix with `m` taps.
+    x : array_like, shape (n[, ...])
+        Input signal.
+    subscripts : str or None, optional
+        String that defines the matrix operations in the multichannel case using the
+        notation from `numpy.einsum`. Subscripts for `b` and `x` and output must start
+        with the same letter, e.g. `nlmk,nk->nl`.
+    zi : int or array_like, shape (m - 1[, ...]), optional
+        Initial condition of the filter, but in reality just the runout of the previous
+        computation.  If `zi` is None (default), then zero initial state is assumed.
+        Zero initial state can be explicitly passes with `0`. Shape after first
+        dimention must be compatible with output defined via `subscripts`.
 
     Returns
     -------
     y : numpy.ndarray
-        The output of the digital filter. Has shape (n[, L]), if `sum_inputs==True`,
-        else shape (n[, L[, M[, K]]]).
+        The output of the digital filter. The precise output shape is defined by
+        `subscripts`, but always `y.shape[0] == n`.
     zf : numpy.ndarray
         If `zi` is None, this is not returned, otherwise, `zf` holds the
-        final filter state. Has shape (m - 1[, L]), if `sum_inputs=True`, else shape
-        (m - 1[, L[, M[, K]]]).
+        final filter state. The precise output shape is defined by `subscripts`, but
+        always `zf.shape[0] == m - 1`.
 
     Notes
     -----
     Based on olafilt from `https://github.com/jthiem/overlapadd`
 
     """
-    # bring into broadcasting shape
     b = np.asarray(b)
     x = np.asarray(x)
+
+    if (b.ndim > 1 or x.ndim > 1) and subscripts is None:
+        raise ValueError("Supply `subscripts` argument for multi-channel filtering.")
 
     L_I = b.shape[0]
     L_sig = x.shape[0]
@@ -100,33 +129,10 @@ def olafilt(b, x, zi=None, sum_inputs=True):
     L_S = L_F - L_I + 1  # length of segments
     offsets = range(0, L_sig, L_S)
 
-    # compute output shape
-    if b.ndim == 1:
-        bsig = "n"
-    elif b.ndim == 2:
-        bsig = "nl"
-    elif b.ndim == 3:
-        bsig = "nlm"
+    if subscripts is None:
+        outshape = (L_sig + L_F)
     else:
-        raise ValueError("b must not have more than 3 dimensions")
-
-    if x.ndim == 1:
-        xsig = "n"
-    elif x.ndim == 2:
-        xsig = "nk"
-    else:
-        raise ValueError("x must not have more than 2 dimensions")
-
-    outsig = "n" + bsig[1:] + xsig[1:]
-    outshape = [L_sig + L_F] + list(b.shape[1:]) + list(x.shape[1:])
-
-    if sum_inputs:
-        outsig = outsig.replace("m", "")
-        outsig = outsig.replace("k", "")
-        if "m" in bsig:
-            outshape.pop(2)
-        if "k" in xsig:
-            outshape.pop(-1)
+        outshape = (L_sig + L_F, *einsum_outshape(subscripts, b, x)[1:])
 
     # handle complex or real input
     if np.iscomplexobj(b) or np.iscomplexobj(x):
@@ -143,12 +149,18 @@ def olafilt(b, x, zi=None, sum_inputs=True):
     # overlap and add
     for n in offsets:
         Xseg = fft_func(x[n : n + L_S], n=L_F, axis=0)
-        res[n : n + L_F] += ifft_func(
-            np.einsum(f"{bsig},{xsig}->{outsig}", B, Xseg), axis=0
-        )
+
+        if subscripts is None:
+            # fast 1D case
+            C = B * Xseg
+        else:
+            # NOTE: use np.einsum with 'optimal' keyword?
+            C = np.einsum(subscripts, B, Xseg)
+
+        res[n : n + L_F] += ifft_func(C, axis=0)
 
     if zi is not None:
-        res[: zi.shape[0]] = res[: zi.shape[0]] + zi
+        res[: L_I - 1] = res[: L_I - 1] + zi
         return res[:L_sig], res[L_sig : L_sig + L_I - 1]
 
     return res[:L_sig]
@@ -209,3 +221,4 @@ def check_lengths(length, blocklength, h_pri, h_sec):
     assert (
         length > primax - secmax - blocklength
     ), f"{length} > {primax} - {secmax} - {blocklength}"
+
