@@ -11,8 +11,7 @@ blocklength = 128  # length of I/O buffer and blocksize of filter
 n_buffers = 150  # size of simulation
 
 # plant
-h = np.zeros(512)
-h[255] = 1
+h = np.random.normal(size=512)
 
 # the adaptive filter
 filt = FastBlockLMSFilter(length, blocklength, power_averaging=0.9)
@@ -44,7 +43,7 @@ for i in range(n_buffers):
     filt.adapt(u, e)
 
     # relative filter error
-    fe = np.sum((h - filt.w)**2) / np.sum((h)**2)
+    fe = np.sum((h - filt.w) ** 2) / np.sum((h) ** 2)
 
     elog.append(e)
     felog.append(fe)

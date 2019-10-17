@@ -33,15 +33,16 @@ class FakeInterface:
         """
         h_pri = np.asarray(h_pri)
         h_sec = np.asarray(h_sec)
-        signal = np.asarray(signal)
+
+        if signal is None:
+            signal = np.zeros((blocklength, *h_pri.shape[1:2]))
+        else:
+            signal = np.asarray(signal)
 
         self.blocklength = blocklength
         self._orig_signal = signal
         self._orig_noise = noise
         self.nblocks = signal.shape[0] // blocklength
-
-        if signal is None:
-            signal = np.zeros((blocklength, *h_pri.shape[1:2]))
 
         # check correct h shapes
         if not cycle_h:

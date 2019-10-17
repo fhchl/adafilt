@@ -35,7 +35,6 @@ sim = FakeInterface(
     noise=wgn(olafilt(h_pri, signal), 20, "dB"),
 )
 
-
 # secondary path estimate has to account for block size
 plant_model = SimpleFilter(np.concatenate((np.zeros(blocklength), h_sec)))
 

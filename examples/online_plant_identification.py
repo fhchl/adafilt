@@ -14,7 +14,7 @@ def moving_rms(x, N):
 
 length = 64  # number of adaptive FIR filter taps
 blocklength = 4  # length of I/O buffer and blocksize of filter
-n_buffers = 100000  # size of simulation
+n_buffers = 50000  # size of simulation
 estimation_phase = 2000
 
 # primary and secondary paths
@@ -35,7 +35,7 @@ sim = FakeInterface(
 
 # the adaptive filter
 filt = FastBlockLMSFilter(
-    length, blocklength, stepsize=0.1, leakage=0.99999, power_averaging=0.9
+    length, blocklength, stepsize=0.01, leakage=0.99999, power_averaging=0.9
 )
 filt.locked = True
 
@@ -44,7 +44,7 @@ plant_model = SimpleFilter(np.zeros(blocklength + length))
 
 # adaptive plant model
 adaptive_plant_model = FastBlockLMSFilter(
-    length, blocklength, stepsize=0.01, leakage=1
+    length, blocklength, stepsize=0.01, leakage=0.99999
 )
 
 # aggregate signals during simulation
