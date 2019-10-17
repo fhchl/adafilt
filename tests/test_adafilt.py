@@ -6,7 +6,7 @@ from scipy.signal import lfilter
 from adafilt.utils import olafilt
 from adafilt.io import FakeInterface
 from adafilt.optimal import wiener_filter
-from adafilt import MultiChannelBlockLMS, Delay, SimpleFilter
+from adafilt import MultiChannelBlockLMS, Delay, SimpleFilter, FastBlockLMSFilter
 
 
 class TestOlafilt:
@@ -402,7 +402,64 @@ class TestDelay:
         npt.assert_array_equal(y[ndelay:], x[:-ndelay])
 
 
+class TestFastBlockLMSFilter:
+    def test_filt(self):
+        length = 16
+        blocks = 16
+        blocklength = length
+        w = np.random.normal(size=length)
+        xs = np.random.normal(size=(blocks, blocklength))
+        x = np.concatenate(xs)
+
+        filt = FastBlockLMSFilter(length, length, initial_coeff=w)
+
+        y = []
+        for xb in xs:
+            y.append(filt.filt(xb))
+        y = np.concatenate(y)
+        yref = lfilter(w, 1, x)
+        npt.assert_almost_equal(y, yref)
+
+
 class TestMultiChannelBlockLMS:
+    def test_single_same_as_multi_filt(self):
+        length = blocks = 128
+        blocklength = 32
+        w = np.random.normal(size=(length, 1, 1)) * 1e-10
+        # w = np.zeros((length, 1, 1))
+
+        filtsc = FastBlockLMSFilter(
+            length=length, blocklength=blocklength, initial_coeff=w[:, 0, 0]
+        )
+        filtmc = MultiChannelBlockLMS(
+            length=length, blocklength=blocklength, initial_coeff=w
+        )
+
+        xs = np.random.normal(size=(blocks, blocklength, 1))
+
+        ysc = []
+        ymc = []
+        for xb in xs:
+            # adapting kills this
+            filtsc.adapt(xb[:, 0], xb[:, 0] * 2)
+            filtmc.adapt(xb[:, None, None], xb * 2)
+
+            # even if you make the filters the same!
+            filtmc.W[:, 0, 0] = filtsc.W.copy()
+            npt.assert_almost_equal(filtsc.w, filtmc.w[:, 0, 0])
+            npt.assert_almost_equal(filtsc.W, filtmc.W[:, 0, 0])
+
+            ysc.append(filtsc.filt(xb[:, 0]))
+            ymc.append(filtmc.filt(xb))
+            npt.assert_almost_equal(ysc[-1], ymc[-1][:, 0])
+
+        ylf = lfilter(w[:, 0, 0], 1, np.concatenate(xs)[:, 0])
+        npt.assert_almost_equal(np.concatenate(ysc), np.concatenate(ymc)[:, 0])
+        npt.assert_almost_equal(np.concatenate(ysc), ylf)
+        npt.assert_almost_equal(filtsc.w, filtmc.w[:, 0, 0])
+        npt.assert_almost_equal(filtsc.W, filtmc.W[:, 0, 0])
+
+
     def test_filt(self):
         for (M, K) in [(M, K) for M in range(1, 4) for K in range(1, 4)]:
             length = 16

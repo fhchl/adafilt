@@ -91,10 +91,12 @@ def wiener_filter(x, d, n, g=None, constrained=False):
         c[n // 2] = 0.5
 
     # minimum phase and allpass components of G
+    # NOTE: could also use https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.minimum_phase.html
     Gmin = np.exp(np.fft.fft(c * np.fft.ifft(2 * np.log(np.abs(G)), n=n), n=n))
     Gall = G / Gmin
 
     # spectral factor
+    # NOTE: couuld also use https://github.com/RJTK/spectral_factorization/blob/master/spectral_factorization.py
     F = np.exp(np.fft.fft(c * np.fft.ifft(np.log(Sxx), n=n), n=n))
 
     h = np.ones(n)
