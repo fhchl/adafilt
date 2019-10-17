@@ -104,7 +104,10 @@ class FakeInterface:
             at error microphone.
 
         """
-        y = np.atleast_1d(y)
+        if y is None:
+            y = np.zeros((self.blocklength, *self._orig_h_sec.shape[3:4]))
+        else:
+            y = np.atleast_1d(y)
 
         if send_signal:
             x = np.atleast_1d(next(self.signal))  # reference signal
@@ -112,7 +115,7 @@ class FakeInterface:
             x = np.zeros((self.blocklength, *self._orig_signal.shape[1:2]))
 
         subscripts_sec = (
-            "nlm"[: self._orig_h_pri.ndim - 1] + "," + "nm"[: y.ndim] + "->n"
+            "nlm"[: self._orig_h_sec.ndim - 1] + "," + "nm"[: y.ndim] + "->n"
         )
         subscripts_pri = (
             "nlk"[: self._orig_h_pri.ndim - 1]
@@ -124,12 +127,10 @@ class FakeInterface:
             subscripts_sec += "l"
             subscripts_pri += "l"
 
-        d, self._zi_pri = olafilt(
-            next(self.h_pri), x, subscripts_pri, zi=self._zi_pri
-        )  # primary path signal at error mic
-        u, self._zi_sec = olafilt(
-            next(self.h_sec), y, subscripts_sec, zi=self._zi_sec
-        )  # secondary path signal at error mic
+        # primary path signal at error mic
+        d, self._zi_pri = olafilt(next(self.h_pri), x, subscripts_pri, zi=self._zi_pri)
+        # secondary path signal at error mic
+        u, self._zi_sec = olafilt(next(self.h_sec), y, subscripts_sec, zi=self._zi_sec)
 
         e = d + u  # error signal
 
