@@ -374,27 +374,24 @@ class FastBlockLMSFilter(AdaptiveFilter):
             self.leakage[:length] = leakage  # nyquist bin is zero!
             self.leakage[length + 1 :] = leakage[:0:-1]  # mirror around nyquist bin
 
-        # attributes that reset with reset()
-        self.P = initial_power
-        self.xfiltbuff = deque(np.zeros(2 * length), maxlen=2 * length)
-        self.xbuff = deque(np.zeros(2 * length), maxlen=2 * length)
-        self.ebuff = deque(np.zeros(length), maxlen=length)
+        self.reset()
 
-        self.W = np.zeros(2 * length, dtype=complex)
         if initial_coeff is not None:
             assert len(initial_coeff) == length
-            self.W[:] = np.fft.fft(initial_coeff, n=2 * length)
+            self.W[:] = np.fft.rfft(initial_coeff, n=2 * length)
+
+        self.P = initial_power
 
     @property
     def w(self):
-        w = np.real(np.fft.ifft(self.W))
+        w = np.real(np.fft.irfft(self.W))
         if self.constrained:
             w = w[: self.length]
         return w
 
     def reset(self):
-        self.P = self.inital_power
-        self.W = np.zeros(2 * self.length, dtype=complex)
+        self.P = 0
+        self.W = np.zeros((2 * self.length) // 2 + 1, dtype=complex)
         self.xfiltbuff = deque(np.zeros(2 * self.length), maxlen=2 * self.length)
         self.xbuff = deque(np.zeros(2 * self.length), maxlen=2 * self.length)
         self.ebuff = deque(np.zeros(self.length), maxlen=self.length)
@@ -418,8 +415,8 @@ class FastBlockLMSFilter(AdaptiveFilter):
 
         # NOTE: X is computed twice per adaptation cycle if filt and adapt are fed with
         # the same signal. Needed for FxLMS.
-        X = np.fft.fft(self.xfiltbuff)
-        y = np.real(np.fft.ifft(self.W * X)[-self.blocklength :])
+        X = np.fft.rfft(self.xfiltbuff)
+        y = np.real(np.fft.irfft(self.W * X)[-self.blocklength :])
         return y
 
     def adapt(self, x, e, window=None):
@@ -442,8 +439,8 @@ class FastBlockLMSFilter(AdaptiveFilter):
         self.xbuff.extend(x)
         self.ebuff.extend(e)
 
-        X = np.fft.fft(self.xbuff)
-        E = np.fft.fft(np.concatenate((np.zeros(self.length), self.ebuff)))
+        X = np.fft.rfft(self.xbuff)
+        E = np.fft.rfft(np.concatenate((np.zeros(self.length), self.ebuff)))
 
         if self.normalized:
             # signal power estimation
@@ -464,9 +461,9 @@ class FastBlockLMSFilter(AdaptiveFilter):
         if self.constrained:
             # note that constraining the frequency dependent step size to be causal
             # can be problematc, see Elliot p. 153
-            U = np.fft.ifft(update)
+            U = np.fft.irfft(update)
             U[self.length :] = 0  # make it causal
-            update = np.fft.fft(U)
+            update = np.fft.rfft(U)
 
         # filter weight adaptation
         self.W = self.leakage * self.W - self.stepsize * update
@@ -506,25 +503,41 @@ class MultiChannelBlockLMS(AdaptiveFilter):
             length = blocklength
         self.length = length
 
-        self.xbuff = deque(
-            np.zeros((2 * self.num_saved_blocks, blocklength, Nsens, Nout, Nin)),
-            maxlen=2 * self.num_saved_blocks,
-        )
-        self.ebuff = deque(
-            np.zeros((self.num_saved_blocks, blocklength, Nsens)),
-            maxlen=self.num_saved_blocks,
-        )
+        self.reset()
 
-        self.W = np.zeros((2 * length, Nout, Nin), dtype=complex)
         if initial_coeff is not None:
             assert initial_coeff.shape[0] == length
-            self.W[:] = np.fft.fft(initial_coeff, axis=0, n=2 * length)
+            self.W[:] = np.fft.rfft(initial_coeff, axis=0, n=2 * length)
 
         self.zifilt = 0
 
+    def reset(self, filt=False):
+        self.W = np.zeros(
+            ((2 * self.length) // 2 + 1, self.Nout, self.Nin), dtype=complex
+        )
+        self.xbuff = deque(
+            np.zeros(
+                (
+                    2 * self.num_saved_blocks,
+                    self.blocklength,
+                    self.Nsens,
+                    self.Nout,
+                    self.Nin,
+                )
+            ),
+            maxlen=2 * self.num_saved_blocks,
+        )
+        self.ebuff = deque(
+            np.zeros((self.num_saved_blocks, self.blocklength, self.Nsens)),
+            maxlen=self.num_saved_blocks,
+        )
+
+        if filt:
+            self.zifilt = 0
+
     @property
     def w(self):
-        w = np.real(np.fft.ifft(self.W, axis=0))
+        w = np.real(np.fft.irfft(self.W, axis=0))
         if self.constrained:
             w = w[: self.length]
         return w
@@ -576,8 +589,8 @@ class MultiChannelBlockLMS(AdaptiveFilter):
         self.xbuff.append(x)
         self.ebuff.append(e)
 
-        X = np.fft.fft(np.concatenate(self.xbuff, axis=0), axis=0)
-        E = np.fft.fft(
+        X = np.fft.rfft(np.concatenate(self.xbuff, axis=0), axis=0)
+        E = np.fft.rfft(
             np.concatenate(
                 (np.zeros((self.length, self.Nsens)), np.concatenate(self.ebuff))
             ),
@@ -597,9 +610,9 @@ class MultiChannelBlockLMS(AdaptiveFilter):
 
         if self.constrained:
             # make it causal
-            ut = np.real(np.fft.ifft(update, axis=0))
+            ut = np.real(np.fft.irfft(update, axis=0))
             ut[self.length :] = 0
-            update = np.fft.fft(ut, axis=0)
+            update = np.fft.rfft(ut, axis=0)
 
         # update filter
         self.W = self.leakage * self.W - self.stepsize * update
