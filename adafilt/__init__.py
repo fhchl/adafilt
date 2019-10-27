@@ -1,9 +1,7 @@
 """Adaptive filtering classes."""
 
 import numpy as np
-from collections import deque
-
-from adafilt.utils import olafilt, atleast_2d, atleast_4d
+from adafilt.utils import olafilt, atleast_2d, atleast_4d, fifo_extend, fifo_append_left
 
 
 class SimpleFilter:
@@ -230,11 +228,16 @@ class LMSFilter(AdaptiveFilter):
         self.minimum_power = minimum_power
         self.normalized = normalized
         self.locked = False
-        self.w = np.zeros(length)
+
+        self.reset()
+
         if initial_coeff is not None:
             self.w[:] = initial_coeff
-        self.xbuff = deque(np.zeros(length), maxlen=length)
-        self.xfiltbuff = deque(np.zeros(length), maxlen=length)
+
+    def reset(self):
+        self.w = np.zeros(self.length)
+        self.xfiltbuff = np.zeros(self.length)
+        self.xbuff = np.zeros(self.length)
 
     def filt(self, x):
         """Filtering step.
@@ -251,7 +254,7 @@ class LMSFilter(AdaptiveFilter):
 
         """
         x = float(x)
-        self.xfiltbuff.appendleft(x)
+        fifo_append_left(self.xfiltbuff, x)
         y = np.dot(self.w, self.xfiltbuff)
         return y
 
@@ -269,7 +272,7 @@ class LMSFilter(AdaptiveFilter):
         x = float(x)
         e = float(e)
 
-        self.xbuff.appendleft(x)
+        fifo_append_left(self.xbuff, x)
 
         if self.locked:
             return
@@ -282,11 +285,6 @@ class LMSFilter(AdaptiveFilter):
             stepsize = self.stepsize
 
         self.w = self.leakage * self.w - stepsize * xvec * np.conj(e)
-
-    def reset(self):
-        self.w = np.zeros(self.length)
-        self.xfiltbuff = deque(np.zeros(self.length), maxlen=self.length)
-        self.xbuff = deque(np.zeros(self.length), maxlen=self.length)
 
 
 class FastBlockLMSFilter(AdaptiveFilter):
@@ -384,7 +382,7 @@ class FastBlockLMSFilter(AdaptiveFilter):
 
     @property
     def w(self):
-        w = np.real(np.fft.irfft(self.W))
+        w = np.fft.irfft(self.W)
         if self.constrained:
             w = w[: self.length]
         return w
@@ -392,9 +390,9 @@ class FastBlockLMSFilter(AdaptiveFilter):
     def reset(self):
         self.P = 0
         self.W = np.zeros((2 * self.length) // 2 + 1, dtype=complex)
-        self.xfiltbuff = deque(np.zeros(2 * self.length), maxlen=2 * self.length)
-        self.xbuff = deque(np.zeros(2 * self.length), maxlen=2 * self.length)
-        self.ebuff = deque(np.zeros(self.length), maxlen=self.length)
+        self.xfiltbuff = np.zeros(2 * self.length)
+        self.xbuff = np.zeros(2 * self.length)
+        self.ebuff = np.zeros(self.length)
 
     def filt(self, x):
         """Filtering step.
@@ -411,12 +409,12 @@ class FastBlockLMSFilter(AdaptiveFilter):
 
         """
         assert len(x) == self.blocklength
-        self.xfiltbuff.extend(x)
+        fifo_extend(self.xfiltbuff, x)
 
         # NOTE: X is computed twice per adaptation cycle if filt and adapt are fed with
         # the same signal. Needed for FxLMS.
         X = np.fft.rfft(self.xfiltbuff)
-        y = np.real(np.fft.irfft(self.W * X)[-self.blocklength :])
+        y = np.fft.irfft(self.W * X)[-self.blocklength :]
         return y
 
     def adapt(self, x, e, window=None):
@@ -436,8 +434,8 @@ class FastBlockLMSFilter(AdaptiveFilter):
         assert len(x) == self.blocklength
         assert len(e) == self.blocklength
 
-        self.xbuff.extend(x)
-        self.ebuff.extend(e)
+        fifo_extend(self.xbuff, x)
+        fifo_extend(self.ebuff, e)
 
         X = np.fft.rfft(self.xbuff)
         E = np.fft.rfft(np.concatenate((np.zeros(self.length), self.ebuff)))
@@ -515,29 +513,22 @@ class MultiChannelBlockLMS(AdaptiveFilter):
         self.W = np.zeros(
             ((2 * self.length) // 2 + 1, self.Nout, self.Nin), dtype=complex
         )
-        self.xbuff = deque(
-            np.zeros(
-                (
-                    2 * self.num_saved_blocks,
-                    self.blocklength,
-                    self.Nsens,
-                    self.Nout,
-                    self.Nin,
-                )
-            ),
-            maxlen=2 * self.num_saved_blocks,
+        self.xbuff = np.zeros(
+            (
+                2 * self.num_saved_blocks * self.blocklength,
+                self.Nsens,
+                self.Nout,
+                self.Nin,
+            )
         )
-        self.ebuff = deque(
-            np.zeros((self.num_saved_blocks, self.blocklength, self.Nsens)),
-            maxlen=self.num_saved_blocks,
-        )
+        self.ebuff = np.zeros((self.num_saved_blocks * self.blocklength, self.Nsens))
 
         if filt:
             self.zifilt = 0
 
     @property
     def w(self):
-        w = np.real(np.fft.irfft(self.W, axis=0))
+        w = np.fft.irfft(self.W, axis=0)
         if self.constrained:
             w = w[: self.length]
         return w
@@ -586,13 +577,13 @@ class MultiChannelBlockLMS(AdaptiveFilter):
         assert x.shape == (self.blocklength, self.Nsens, self.Nout, self.Nin)
         assert e.shape == (self.blocklength, self.Nsens)
 
-        self.xbuff.append(x)
-        self.ebuff.append(e)
+        fifo_extend(self.xbuff, x)
+        fifo_extend(self.ebuff, e)
 
-        X = np.fft.rfft(np.concatenate(self.xbuff, axis=0), axis=0)
+        X = np.fft.rfft(self.xbuff, axis=0)
         E = np.fft.rfft(
             np.concatenate(
-                (np.zeros((self.length, self.Nsens)), np.concatenate(self.ebuff))
+                (np.zeros((self.length, self.Nsens)), self.ebuff)
             ),
             axis=0,
         )
@@ -610,7 +601,7 @@ class MultiChannelBlockLMS(AdaptiveFilter):
 
         if self.constrained:
             # make it causal
-            ut = np.real(np.fft.irfft(update, axis=0))
+            ut = np.fft.irfft(update, axis=0)
             ut[self.length :] = 0
             update = np.fft.rfft(ut, axis=0)
 

@@ -57,7 +57,7 @@ def einsum_outshape(subscripts, *operants):
 
     """
     if "." in subscripts:
-        raise ValueError(f'Ellipses are not supported: {subscripts}')
+        raise ValueError(f"Ellipses are not supported: {subscripts}")
 
     insubs, outsubs = subscripts.replace(",", "").split("->")
     if outsubs == "":
@@ -70,7 +70,7 @@ def einsum_outshape(subscripts, *operants):
         try:
             outshape.append(innumber[indices].max())
         except ValueError:
-            raise ValueError(f'Invalid subscripts: {subscripts}')
+            raise ValueError(f"Invalid subscripts: {subscripts}")
     return tuple(outshape)
 
 
@@ -130,7 +130,7 @@ def olafilt(b, x, subscripts=None, zi=None):
     offsets = range(0, L_sig, L_S)
 
     if subscripts is None:
-        outshape = (L_sig + L_F)
+        outshape = L_sig + L_F
     else:
         outshape = (L_sig + L_F, *einsum_outshape(subscripts, b, x)[1:])
 
@@ -222,3 +222,15 @@ def check_lengths(length, blocklength, h_pri, h_sec):
         length > primax - secmax - blocklength
     ), f"{length} > {primax} - {secmax} - {blocklength}"
 
+
+def fifo_extend(a, b):
+    """Right-extend a with b and popleft same number of elements."""
+    n = len(b)
+    a[:-n] = a[n:]
+    a[-n:] = b
+
+
+def fifo_append_left(a, b):
+    """Left-extend a with b and popleft same number of elements."""
+    a[1:] = a[:-1]
+    a[:1] = b
