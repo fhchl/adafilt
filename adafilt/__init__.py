@@ -1,7 +1,9 @@
 """Adaptive filtering classes."""
 
 import numpy as np
-from adafilt.utils import olafilt, atleast_2d, atleast_4d, fifo_extend, fifo_append_left
+
+from adafilt.utils import (atleast_2d, atleast_4d, fifo_append_left,
+                           fifo_extend, olafilt)
 
 
 class SimpleFilter:
@@ -481,6 +483,9 @@ class MultiChannelBlockLMS(AdaptiveFilter):
         leakage=1,
         initial_coeff=None,
         constrained=True,
+        normalized='sum_errors',
+        power_averaging=0.5,
+        minimum_power=1e-5
     ):
         """Create multi-channel block-wise LMS adaptive filter object."""
         assert length >= blocklength, "Filter must be at least as long as block"
@@ -494,22 +499,23 @@ class MultiChannelBlockLMS(AdaptiveFilter):
         self.num_saved_blocks = length // blocklength
         self.constrained = constrained
         self.locked = False
-        self.normalized = False
+        self.normalized = normalized
         self.leakage = leakage
+        self.power_averaging = power_averaging
+        self.minimum_power = minimum_power
 
         if length is None:
             length = blocklength
         self.length = length
 
-        self.reset()
+        self.reset(filt=True)
 
         if initial_coeff is not None:
             assert initial_coeff.shape[0] == length
             self.W[:] = np.fft.rfft(initial_coeff, axis=0, n=2 * length)
 
-        self.zifilt = 0
-
     def reset(self, filt=False):
+        self.P = 0
         self.W = np.zeros(
             ((2 * self.length) // 2 + 1, self.Nout, self.Nin), dtype=complex
         )
@@ -589,15 +595,24 @@ class MultiChannelBlockLMS(AdaptiveFilter):
         )
 
         if self.normalized:
-            # TODO: implement
-            D = 1
+            if self.normalized == 'elementwise':
+                power = np.abs(X) ** 2
+            else:  # self.normalized == 'sum_errors':
+                power = np.sum(np.abs(X) ** 2, axis=1, keepdims=True)
+            # signal power estimation
+            self.P = (
+                self.power_averaging * self.P
+                + (1 - self.power_averaging) * power
+            )
+            # normalization factor
+            D = 1 / (self.P + self.minimum_power)
         else:
             D = 1
 
         if self.locked:
             return
 
-        update = D * np.einsum("nlmk,nl->nmk", X.conj(), E)
+        update = np.einsum("nlmk,nl->nmk", D * X.conj(), E)
 
         if self.constrained:
             # make it causal
