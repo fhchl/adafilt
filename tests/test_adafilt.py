@@ -404,6 +404,7 @@ class TestDelay:
 
 class TestFastBlockLMSFilter:
     def test_filt(self):
+        """FastBlockLMSFilter.filt behaves like lfilter."""
         length = 16
         blocks = 16
         blocklength = length
@@ -420,19 +421,47 @@ class TestFastBlockLMSFilter:
         yref = lfilter(w, 1, x)
         npt.assert_almost_equal(y, yref)
 
+    def test_filt_w_output(self):
+        """FastBlockLMSFilter.filt behaves like lfilter when w is taken from filt."""
+        length = 16
+        blocks = 16
+        blocklength = length
+        w = np.random.normal(size=length)
+        xs = np.random.normal(size=(blocks, blocklength))
+        x = np.concatenate(xs)
+
+        filt = FastBlockLMSFilter(length, length, initial_coeff=w)
+
+        y = []
+        for xb in xs:
+            y.append(filt.filt(xb))
+        y = np.concatenate(y)
+        yref = lfilter(filt.w, 1, x)
+        npt.assert_almost_equal(y, yref)
+
 
 class TestMultiChannelBlockLMS:
     def test_single_same_as_multi_filt(self):
         length = blocks = 128
         blocklength = 32
-        w = np.random.normal(size=(length, 1, 1)) * 1e-10
+        w = np.random.normal(size=(length, 1, 1))
         # w = np.zeros((length, 1, 1))
 
         filtsc = FastBlockLMSFilter(
-            length=length, blocklength=blocklength, initial_coeff=w[:, 0, 0]
+            length=length,
+            blocklength=blocklength,
+            initial_coeff=w[:, 0, 0],
+            stepsize=0.01,
+            constrained=True,
+            normalized=False
         )
         filtmc = MultiChannelBlockLMS(
-            length=length, blocklength=blocklength, initial_coeff=w
+            length=length,
+            blocklength=blocklength,
+            initial_coeff=w,
+            stepsize=0.01,
+            constrained=True,
+            normalized=False
         )
 
         xs = np.random.normal(size=(blocks, blocklength, 1))
@@ -444,29 +473,62 @@ class TestMultiChannelBlockLMS:
             filtsc.adapt(xb[:, 0], xb[:, 0] * 2)
             filtmc.adapt(xb[:, None, None], xb * 2)
 
-            # even if you make the filters the same!
-            filtmc.W[:, 0, 0] = filtsc.W.copy()
-            npt.assert_almost_equal(filtsc.w, filtmc.w[:, 0, 0])
-            npt.assert_almost_equal(filtsc.W, filtmc.W[:, 0, 0])
+            ysc.append(filtsc.filt(xb[:, 0]))
+            ymc.append(filtmc.filt(xb))
+            npt.assert_almost_equal(ysc[-1], ymc[-1][:, 0])
+
+        npt.assert_almost_equal(np.concatenate(ysc), np.concatenate(ymc)[:, 0])
+        npt.assert_almost_equal(filtsc.w, filtmc.w[:, 0, 0])
+        npt.assert_almost_equal(filtsc.W, filtmc.W[:, 0, 0])
+
+    def test_single_same_as_multi_filt_normalized(self):
+        length = blocks = 128
+        blocklength = 32
+        w = np.random.normal(size=(length, 1, 1))
+        # w = np.zeros((length, 1, 1))
+
+        filtsc = FastBlockLMSFilter(
+            length=length,
+            blocklength=blocklength,
+            initial_coeff=w[:, 0, 0],
+            stepsize=0.01,
+            constrained=True,
+            normalized=True
+        )
+        filtmc = MultiChannelBlockLMS(
+            length=length,
+            blocklength=blocklength,
+            initial_coeff=w,
+            stepsize=0.01,
+            constrained=True,
+            normalized='elementwise'
+        )
+
+        xs = np.random.normal(size=(blocks, blocklength, 1))
+
+        ysc = []
+        ymc = []
+        for xb in xs:
+            # adapting kills this
+            filtsc.adapt(xb[:, 0], xb[:, 0] * 2)
+            filtmc.adapt(xb[:, None, None], xb * 2)
 
             ysc.append(filtsc.filt(xb[:, 0]))
             ymc.append(filtmc.filt(xb))
             npt.assert_almost_equal(ysc[-1], ymc[-1][:, 0])
 
-        ylf = lfilter(w[:, 0, 0], 1, np.concatenate(xs)[:, 0])
         npt.assert_almost_equal(np.concatenate(ysc), np.concatenate(ymc)[:, 0])
-        npt.assert_almost_equal(np.concatenate(ysc), ylf)
         npt.assert_almost_equal(filtsc.w, filtmc.w[:, 0, 0])
         npt.assert_almost_equal(filtsc.W, filtmc.W[:, 0, 0])
 
-
     def test_filt(self):
+        """MultiChannelBlockLMS.filt behaves like lfilter or olafilt."""
         for (M, K) in [(M, K) for M in range(1, 4) for K in range(1, 4)]:
             length = 16
             blocks = 16
             blocklength = 16
-            w = np.random.normal(size=(length, M, K))
-            xs = np.random.normal(size=(blocks, blocklength, K))
+            w = np.random.normal(size=(length, M, K))  # Random filter coefficients
+            xs = np.random.normal(size=(blocks, blocklength, K))  # blockwise input
             x = np.concatenate(xs)
 
             filt = MultiChannelBlockLMS(
@@ -486,13 +548,14 @@ class TestMultiChannelBlockLMS:
             for xb in xs:
                 xb_copy = xb.copy()
                 y.append(filt.filt(xb))
-                assert np.array_equal(xb_copy, xb)
+                assert np.array_equal(xb_copy, xb)  # test that xb is not changed
             y = np.concatenate(y)
 
-            npt.assert_almost_equal(olafilt(w, x, "nmk,nk->nm"), y)
+            npt.assert_almost_equal(olafilt(w, x, "nmk,nk->nm"), y)  # like olafilt
+
             yref = np.zeros(y.shape)
             for m in range(M):
                 for k in range(K):
                     yref[:, m] += lfilter(w[:, m, k], 1, x[:, k])
 
-            npt.assert_almost_equal(y, yref, err_msg=f"shape: {(M, K)}")
+            npt.assert_almost_equal(y, yref, err_msg=f"shape: {(M, K)}")  # like lfiter

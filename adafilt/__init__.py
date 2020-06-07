@@ -300,7 +300,6 @@ class FastBlockLMSFilter(AdaptiveFilter):
         leakage=1,
         power_averaging=0.5,
         initial_coeff=None,
-        initial_power=1e-2,
         minimum_power=1e-5,
         constrained=True,
         normalized=True,
@@ -341,7 +340,7 @@ class FastBlockLMSFilter(AdaptiveFilter):
         mean square error (Hansen, p. 419)
 
         TODO:
-        - use rfft if appropriate. Saves 20% time.
+        - DONE use rfft if appropriate. Saves 20% time.
         - Gain or power constraints on filters
           (rafaelyComputationallyEfficientFrequencydomain2000)
         - Unbiased normalized algorithm
@@ -360,7 +359,6 @@ class FastBlockLMSFilter(AdaptiveFilter):
         self.normalized = normalized
         self.locked = False
         self.minimum_power = minimum_power
-        self.initial_power = initial_power
 
         if length is None:
             length = blocklength
@@ -379,8 +377,6 @@ class FastBlockLMSFilter(AdaptiveFilter):
         if initial_coeff is not None:
             assert len(initial_coeff) == length
             self.W[:] = np.fft.rfft(initial_coeff, n=2 * length)
-
-        self.P = initial_power
 
     @property
     def w(self):
@@ -528,6 +524,7 @@ class MultiChannelBlockLMS(AdaptiveFilter):
             )
         )
         self.ebuff = np.zeros((self.num_saved_blocks * self.blocklength, self.Nsens))
+        self.xfiltbuff = np.zeros((2 * self.length, self.Nin))
 
         if filt:
             self.zifilt = 0
@@ -539,8 +536,12 @@ class MultiChannelBlockLMS(AdaptiveFilter):
             w = w[: self.length]
         return w
 
-    def filt(self, x):
-        """Filter reference signal.
+    def filt_time_fast(self, x):
+        """Filter reference signal in time domain.
+
+        This is slightly different to `MultiChannelBlockLMS.filt` and
+        `MultiChannelBlockLMS.filt`: the convolution of the last block is computed
+        with the old filter. Might be faster for some filter dimensions.
 
         Parameters
         ----------
@@ -560,7 +561,56 @@ class MultiChannelBlockLMS(AdaptiveFilter):
         # NOTE: filtering could also be done in FD. When is each one better?
         # NOTE: give olafilt the FFT of w?
         y, self.zifilt = olafilt(self.w, x, "nmk,nk->nm", zi=self.zifilt)
+
         return y
+
+    def filt_time(self, x):
+        """Filter reference signal in time domain.
+
+        Parameters
+        ----------
+        x : (blocklength, Nin) array_like
+            Reference signal.
+
+        Returns
+        -------
+        y : (blocklength, Nout) numpy.ndarray
+            Filter output.
+
+        """
+        x = atleast_2d(x)
+        assert x.shape[0] == self.blocklength
+        assert x.shape[1] == self.Nin
+        fifo_extend(self.xfiltbuff, x)
+
+        # NOTE: filtering could also be done in FD. When is each one better?
+        # NOTE: give olafilt the FFT of w?
+        y, _ = olafilt(self.w, self.xfiltbuff, "nmk,nk->nm", zi=self.zifilt)
+
+        return y[-self.blocklength :]
+
+    def filt(self, x):
+        """Filter reference signal in frequency domain.
+
+        Parameters
+        ----------
+        x : (blocklength, Nin) array_like
+            Reference signal.
+
+        Returns
+        -------
+        y : (blocklength, Nout) numpy.ndarray
+            Filter output.
+
+        """
+        x = atleast_2d(x)
+        assert x.shape[0] == self.blocklength
+        assert x.shape[1] == self.Nin
+        fifo_extend(self.xfiltbuff, x)
+
+        X = np.fft.rfft(self.xfiltbuff, axis=0)
+        y = np.fft.irfft(np.einsum("nmk,nk->nm", self.W, X), axis=0)
+        return y[-self.blocklength :]
 
     def adapt(self, x, e):
         """Adaptation step.
@@ -597,15 +647,16 @@ class MultiChannelBlockLMS(AdaptiveFilter):
         if self.normalized:
             if self.normalized == 'elementwise':
                 power = np.abs(X) ** 2
-            else:  # self.normalized == 'sum_errors':
+            elif self.normalized == 'sum_errors':
                 power = np.sum(np.abs(X) ** 2, axis=1, keepdims=True)
-            # signal power estimation
+            else:
+                raise ValueError(f'Unknown normalization "{self.normalized}".')
+
             self.P = (
                 self.power_averaging * self.P
                 + (1 - self.power_averaging) * power
             )
-            # normalization factor
-            D = 1 / (self.P + self.minimum_power)
+            D = 1 / (self.P + self.minimum_power)  # normalization factor
         else:
             D = 1
 
