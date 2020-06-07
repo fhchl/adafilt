@@ -2,7 +2,7 @@
 
 from itertools import cycle
 import numpy as np
-from adafilt.utils import olafilt
+from adafilt import olafilt
 
 
 class FakeInterface:

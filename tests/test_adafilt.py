@@ -3,10 +3,15 @@ import numpy as np
 import numpy.testing as npt
 from scipy.signal import lfilter
 
-from adafilt.utils import olafilt
 from adafilt.io import FakeInterface
 from adafilt.optimal import wiener_filter
-from adafilt import MultiChannelBlockLMS, Delay, SimpleFilter, FastBlockLMSFilter
+from adafilt import (
+    MultiChannelBlockLMS,
+    Delay,
+    SimpleFilter,
+    FastBlockLMSFilter,
+    olafilt,
+)
 
 
 class TestOlafilt:
@@ -453,7 +458,7 @@ class TestMultiChannelBlockLMS:
             initial_coeff=w[:, 0, 0],
             stepsize=0.01,
             constrained=True,
-            normalized=False
+            normalized=False,
         )
         filtmc = MultiChannelBlockLMS(
             length=length,
@@ -461,7 +466,7 @@ class TestMultiChannelBlockLMS:
             initial_coeff=w,
             stepsize=0.01,
             constrained=True,
-            normalized=False
+            normalized=False,
         )
 
         xs = np.random.normal(size=(blocks, blocklength, 1))
@@ -493,7 +498,7 @@ class TestMultiChannelBlockLMS:
             initial_coeff=w[:, 0, 0],
             stepsize=0.01,
             constrained=True,
-            normalized=True
+            normalized=True,
         )
         filtmc = MultiChannelBlockLMS(
             length=length,
@@ -501,7 +506,7 @@ class TestMultiChannelBlockLMS:
             initial_coeff=w,
             stepsize=0.01,
             constrained=True,
-            normalized='elementwise'
+            normalized="elementwise",
         )
 
         xs = np.random.normal(size=(blocks, blocklength, 1))

@@ -3,7 +3,98 @@
 import numpy as np
 
 from adafilt.utils import (atleast_2d, atleast_4d, fifo_append_left,
-                           fifo_extend, olafilt)
+                           fifo_extend, einsum_outshape)
+
+
+def olafilt(b, x, subscripts=None, zi=None):
+    """Filter a multi dimensional array with an FIR filter matrix.
+
+    Filter a data sequence, `x`, using a FIR filter given in `b`.
+    Filtering uses the overlap-add method converting both `x` and `b`
+    into frequency domain first.  The FFT size is determined as the
+    next higher power of 2 of twice the length of `b`.
+
+    Multi-channel fitering is support via `numpy.einsum` notation.
+
+    Parameters
+    ----------
+    b : array_like, shape (m[, ...])
+        Filter matrix with `m` taps.
+    x : array_like, shape (n[, ...])
+        Input signal.
+    subscripts : str or None, optional
+        String that defines the matrix operations in the multichannel case using the
+        notation from `numpy.einsum`. Subscripts for `b` and `x` and output must start
+        with the same letter, e.g. `nlmk,nk->nl`.
+    zi : int or array_like, shape (m - 1[, ...]), optional
+        Initial condition of the filter, but in reality just the runout of the previous
+        computation.  If `zi` is None (default), then zero initial state is assumed.
+        Zero initial state can be explicitly passes with `0`. Shape after first
+        dimention must be compatible with output defined via `subscripts`.
+
+    Returns
+    -------
+    y : numpy.ndarray
+        The output of the digital filter. The precise output shape is defined by
+        `subscripts`, but always `y.shape[0] == n`.
+    zf : numpy.ndarray
+        If `zi` is None, this is not returned, otherwise, `zf` holds the
+        final filter state. The precise output shape is defined by `subscripts`, but
+        always `zf.shape[0] == m - 1`.
+
+    Notes
+    -----
+    Based on olafilt from `https://github.com/jthiem/overlapadd`
+
+    """
+    b = np.asarray(b)
+    x = np.asarray(x)
+
+    if (b.ndim > 1 or x.ndim > 1) and subscripts is None:
+        raise ValueError("Supply `subscripts` argument for multi-channel filtering.")
+
+    L_I = b.shape[0]
+    L_sig = x.shape[0]
+
+    # find power of 2 larger that 2*L_I (from abarnert on Stackoverflow)
+    L_F = int(2 << (L_I - 1).bit_length())  # FFT Size
+    L_S = L_F - L_I + 1  # length of segments
+    offsets = range(0, L_sig, L_S)
+
+    if subscripts is None:
+        outshape = L_sig + L_F
+    else:
+        outshape = (L_sig + L_F, *einsum_outshape(subscripts, b, x)[1:])
+
+    # handle complex or real input
+    if np.iscomplexobj(b) or np.iscomplexobj(x):
+        fft_func = np.fft.fft
+        ifft_func = np.fft.ifft
+        res = np.zeros(outshape, dtype=np.complex128)
+    else:
+        fft_func = np.fft.rfft
+        ifft_func = np.fft.irfft
+        res = np.zeros(outshape)
+
+    B = fft_func(b, n=L_F, axis=0)
+
+    # overlap and add
+    for n in offsets:
+        Xseg = fft_func(x[n : n + L_S], n=L_F, axis=0)
+
+        if subscripts is None:
+            # fast 1D case
+            C = B * Xseg
+        else:
+            C = np.einsum(subscripts, B, Xseg)
+
+        res[n : n + L_F] += ifft_func(C, axis=0)
+
+    if zi is not None:
+        res[: L_I - 1] = res[: L_I - 1] + zi
+        return res[:L_sig], res[L_sig : L_sig + L_I - 1]
+
+    return res[:L_sig]
 
 
 class SimpleFilter:
@@ -238,8 +329,8 @@ class LMSFilter(AdaptiveFilter):
 
     def reset(self):
         self.w = np.zeros(self.length)
-        self.xfiltbuff = np.zeros(self.length)
-        self.xbuff = np.zeros(self.length)
+        self._xfiltbuff = np.zeros(self.length)
+        self._xbuff = np.zeros(self.length)
 
     def filt(self, x):
         """Filtering step.
@@ -256,8 +347,8 @@ class LMSFilter(AdaptiveFilter):
 
         """
         x = float(x)
-        fifo_append_left(self.xfiltbuff, x)
-        y = np.dot(self.w, self.xfiltbuff)
+        fifo_append_left(self._xfiltbuff, x)
+        y = np.dot(self.w, self._xfiltbuff)
         return y
 
     def adapt(self, x, e):
@@ -274,12 +365,12 @@ class LMSFilter(AdaptiveFilter):
         x = float(x)
         e = float(e)
 
-        fifo_append_left(self.xbuff, x)
+        fifo_append_left(self._xbuff, x)
 
         if self.locked:
             return
 
-        xvec = np.array(self.xbuff)
+        xvec = np.array(self._xbuff)
 
         if self.normalized:
             stepsize = self.stepsize / (np.dot(xvec, xvec) + self.minimum_power)
@@ -340,7 +431,6 @@ class FastBlockLMSFilter(AdaptiveFilter):
         mean square error (Hansen, p. 419)
 
         TODO:
-        - DONE use rfft if appropriate. Saves 20% time.
         - Gain or power constraints on filters
           (rafaelyComputationallyEfficientFrequencydomain2000)
         - Unbiased normalized algorithm
@@ -386,11 +476,11 @@ class FastBlockLMSFilter(AdaptiveFilter):
         return w
 
     def reset(self):
-        self.P = 0
+        self._P = 0
         self.W = np.zeros((2 * self.length) // 2 + 1, dtype=complex)
-        self.xfiltbuff = np.zeros(2 * self.length)
-        self.xbuff = np.zeros(2 * self.length)
-        self.ebuff = np.zeros(self.length)
+        self._xfiltbuff = np.zeros(2 * self.length)
+        self._xbuff = np.zeros(2 * self.length)
+        self._ebuff = np.zeros(self.length)
 
     def filt(self, x):
         """Filtering step.
@@ -407,11 +497,11 @@ class FastBlockLMSFilter(AdaptiveFilter):
 
         """
         assert len(x) == self.blocklength
-        fifo_extend(self.xfiltbuff, x)
+        fifo_extend(self._xfiltbuff, x)
 
         # NOTE: X is computed twice per adaptation cycle if filt and adapt are fed with
         # the same signal. Needed for FxLMS.
-        X = np.fft.rfft(self.xfiltbuff)
+        X = np.fft.rfft(self._xfiltbuff)
         y = np.fft.irfft(self.W * X)[-self.blocklength :]
         return y
 
@@ -432,20 +522,20 @@ class FastBlockLMSFilter(AdaptiveFilter):
         assert len(x) == self.blocklength
         assert len(e) == self.blocklength
 
-        fifo_extend(self.xbuff, x)
-        fifo_extend(self.ebuff, e)
+        fifo_extend(self._xbuff, x)
+        fifo_extend(self._ebuff, e)
 
-        X = np.fft.rfft(self.xbuff)
-        E = np.fft.rfft(np.concatenate((np.zeros(self.length), self.ebuff)))
+        X = np.fft.rfft(self._xbuff)
+        E = np.fft.rfft(np.concatenate((np.zeros(self.length), self._ebuff)))
 
         if self.normalized:
             # signal power estimation
-            self.P = (
-                self.power_averaging * self.P
+            self._P = (
+                self.power_averaging * self._P
                 + (1 - self.power_averaging) * np.abs(X) ** 2
             )
             # normalization factor
-            D = 1 / (self.P + self.minimum_power)
+            D = 1 / (self._P + self.minimum_power)
         else:
             D = 1
 
@@ -484,21 +574,22 @@ class MultiChannelBlockLMS(AdaptiveFilter):
         minimum_power=1e-5
     ):
         """Create multi-channel block-wise LMS adaptive filter object."""
-        assert length >= blocklength, "Filter must be at least as long as block"
-        assert length % blocklength == 0
+        assert length >= blocklength, "`length` must larger or equal `blocklength`"
+        assert length % blocklength == 0, "`length` must be multiple of `blocklength`"
 
         self.Nin = Nin
         self.Nout = Nout
         self.Nsens = Nsens
         self.blocklength = blocklength
         self.stepsize = stepsize
-        self.num_saved_blocks = length // blocklength
         self.constrained = constrained
         self.locked = False
         self.normalized = normalized
         self.leakage = leakage
         self.power_averaging = power_averaging
         self.minimum_power = minimum_power
+
+        self._num_saved_blocks = length // blocklength
 
         if length is None:
             length = blocklength
@@ -511,23 +602,23 @@ class MultiChannelBlockLMS(AdaptiveFilter):
             self.W[:] = np.fft.rfft(initial_coeff, axis=0, n=2 * length)
 
     def reset(self, filt=False):
-        self.P = 0
+        self._P = 0
         self.W = np.zeros(
             ((2 * self.length) // 2 + 1, self.Nout, self.Nin), dtype=complex
         )
-        self.xbuff = np.zeros(
+        self._xbuff = np.zeros(
             (
-                2 * self.num_saved_blocks * self.blocklength,
+                2 * self.length,
                 self.Nsens,
                 self.Nout,
                 self.Nin,
             )
         )
-        self.ebuff = np.zeros((self.num_saved_blocks * self.blocklength, self.Nsens))
-        self.xfiltbuff = np.zeros((2 * self.length, self.Nin))
+        self._xfiltbuff = np.zeros((2 * self.length, self.Nin))
+        self._ebuff = np.zeros((self.length, self.Nsens))
 
         if filt:
-            self.zifilt = 0
+            self._zifilt = 0
 
     @property
     def w(self):
@@ -560,7 +651,7 @@ class MultiChannelBlockLMS(AdaptiveFilter):
 
         # NOTE: filtering could also be done in FD. When is each one better?
         # NOTE: give olafilt the FFT of w?
-        y, self.zifilt = olafilt(self.w, x, "nmk,nk->nm", zi=self.zifilt)
+        y, self._zifilt = olafilt(self.w, x, "nmk,nk->nm", zi=self._zifilt)
 
         return y
 
@@ -581,11 +672,11 @@ class MultiChannelBlockLMS(AdaptiveFilter):
         x = atleast_2d(x)
         assert x.shape[0] == self.blocklength
         assert x.shape[1] == self.Nin
-        fifo_extend(self.xfiltbuff, x)
+        fifo_extend(self._xfiltbuff, x)
 
         # NOTE: filtering could also be done in FD. When is each one better?
         # NOTE: give olafilt the FFT of w?
-        y, _ = olafilt(self.w, self.xfiltbuff, "nmk,nk->nm", zi=self.zifilt)
+        y, _ = olafilt(self.w, self._xfiltbuff, "nmk,nk->nm", zi=self._zifilt)
 
         return y[-self.blocklength :]
 
@@ -606,9 +697,9 @@ class MultiChannelBlockLMS(AdaptiveFilter):
         x = atleast_2d(x)
         assert x.shape[0] == self.blocklength
         assert x.shape[1] == self.Nin
-        fifo_extend(self.xfiltbuff, x)
+        fifo_extend(self._xfiltbuff, x)
 
-        X = np.fft.rfft(self.xfiltbuff, axis=0)
+        X = np.fft.rfft(self._xfiltbuff, axis=0)
         y = np.fft.irfft(np.einsum("nmk,nk->nm", self.W, X), axis=0)
         return y[-self.blocklength :]
 
@@ -633,13 +724,13 @@ class MultiChannelBlockLMS(AdaptiveFilter):
         assert x.shape == (self.blocklength, self.Nsens, self.Nout, self.Nin)
         assert e.shape == (self.blocklength, self.Nsens)
 
-        fifo_extend(self.xbuff, x)
-        fifo_extend(self.ebuff, e)
+        fifo_extend(self._xbuff, x)
+        fifo_extend(self._ebuff, e)
 
-        X = np.fft.rfft(self.xbuff, axis=0)
+        X = np.fft.rfft(self._xbuff, axis=0)
         E = np.fft.rfft(
             np.concatenate(
-                (np.zeros((self.length, self.Nsens)), self.ebuff)
+                (np.zeros((self.length, self.Nsens)), self._ebuff)
             ),
             axis=0,
         )
@@ -652,11 +743,11 @@ class MultiChannelBlockLMS(AdaptiveFilter):
             else:
                 raise ValueError(f'Unknown normalization "{self.normalized}".')
 
-            self.P = (
-                self.power_averaging * self.P
+            self._P = (
+                self.power_averaging * self._P
                 + (1 - self.power_averaging) * power
             )
-            D = 1 / (self.P + self.minimum_power)  # normalization factor
+            D = 1 / (self._P + self.minimum_power)  # normalization factor
         else:
             D = 1
 
@@ -665,11 +756,9 @@ class MultiChannelBlockLMS(AdaptiveFilter):
 
         update = np.einsum("nlmk,nl->nmk", D * X.conj(), E)
 
-        if self.constrained:
-            # make it causal
+        if self.constrained:  # make it causal
             ut = np.fft.irfft(update, axis=0)
             ut[self.length :] = 0
             update = np.fft.rfft(ut, axis=0)
 
-        # update filter
-        self.W = self.leakage * self.W - self.stepsize * update
+        self.W = self.leakage * self.W - self.stepsize * update  # update filter
