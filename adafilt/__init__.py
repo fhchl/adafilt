@@ -145,31 +145,43 @@ class SimpleFilter:
 class Delay:
     """A simple delay."""
 
-    def __init__(self, nsamples, zi=None):
+    def __init__(self, n_delay, n_sig=None, zi=None, blocklength=None, dtype=np.float64):
         """Create simple delay.
 
         Parameters
         ----------
-        nsamples : int
-            Delay by `nsamples` samples.
+        n_delay : int
+            Delay by `n_delay` samples.
+        n_sig : int
+            Number of channels.
         zi : array_like or None, optional
             Initial filter condition.
 
         """
-        self.zi = zi
-        self.nsamples = nsamples
+        if n_sig is not None:
+            self._zi = np.zeros((n_delay, n_sig), dtype=dtype)
+        else:
+            self._zi = np.zeros(n_delay, dtype=dtype)
+
+        if zi is not None:
+            self._zi[:] = zi
+
+        self._n_delay = n_delay
+        self._blocklength = blocklength
 
     def __call__(self, x):
         """See `Delay.filt`."""
         return self.filt(x)
 
-    def filt(self, x):
+    def filt(self, x, out=None):
         """Filter signal.
 
         Parameters
         ----------
-        x : array_like, shape (N,) or (N, M)
+        x : numpy.ndarray, shape (N,) or (N, M)
             Signal with samples along first dimension
+        out : numpy.ndarray, shape (N,) or (N, M), optional
+            Preallocated output array
 
         Returns
         -------
@@ -177,18 +189,22 @@ class Delay:
             The filtered signal of shape (N, ) or (N, M)
 
         """
-        x_orig_shape = x.shape
-        x = atleast_2d(x)
-        nout, nsig = x.shape
+        x = np.asarray(x)
 
-        if self.zi is None:
-            # first filtering: fill with zeros
-            self.zi = np.zeros((self.nsamples, nsig))
+        if out is None:
+            out = np.empty(x.shape, dtype=x.dtype)
 
-        zx = np.concatenate((self.zi, x), axis=0)
-        out = zx[:nout]
-        self.zi = zx[nout:]
-        return out.reshape(x_orig_shape)
+        n = x.shape[0]
+        if n <= self._n_delay:
+            out[:] = self._zi[:n]
+            self._zi[:-n:] = self._zi[n:]
+            self._zi[-n:] = x
+        else:
+            out[:self._n_delay] = self._zi
+            out[self._n_delay:] = x[:-self._n_delay]
+            self._zi[:] = x[-self._n_delay:]
+
+        return out
 
 
 class AdaptiveFilter:

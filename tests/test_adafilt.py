@@ -406,6 +406,43 @@ class TestDelay:
 
         npt.assert_array_equal(y[ndelay:], x[:-ndelay])
 
+    def test_delay_simple(self):
+        delay = Delay(n_delay=3, zi=[0, 0, 0])
+        x = np.array([1, 2, 3, 4, 5])
+        y = delay.filt(x)
+        npt.assert_array_equal(y, [0, 0, 0, 1, 2])
+
+        x = np.array([6, 7, 8, 9, 10, 11])
+        y = delay.filt(x)
+        npt.assert_array_equal(y, [3, 4, 5, 6, 7, 8])
+
+    def test_delay_with_out(self):
+        x = np.array([1, 2, 3, 4, 5])
+        delay = Delay(n_delay=3, zi=[6, 7, 8])
+        out = np.zeros(x.shape)
+        delay.filt(x, out)
+        npt.assert_array_equal(out, [6, 7, 8, 1, 2])
+
+    def test_delay_blocksize_smaller_delay(self):
+        blocklength = 2
+        delay = Delay(n_delay=3, zi=[0, 0, 0], blocklength=blocklength)
+        x = np.array([1, 2, 3, 4, 5, 6])
+        y = np.zeros(x.shape, x.dtype)
+        for xb, yb in zip(x.reshape(-1, blocklength), y.reshape(-1, blocklength)):
+            delay.filt(xb, out=yb)
+
+        npt.assert_array_equal(y, [0, 0, 0, 1, 2, 3])
+
+    def test_delay_blocksize_larger_delay(self):
+        blocklength = 2
+        delay = Delay(n_delay=1, zi=[0], blocklength=blocklength)
+        x = np.array([1, 2, 3, 4, 5, 6])
+        y = np.zeros(x.shape, x.dtype)
+        for xb, yb in zip(x.reshape(-1, blocklength), y.reshape(-1, blocklength)):
+            delay.filt(xb, out=yb)
+
+        npt.assert_array_equal(y, [0, 1, 2, 3, 4, 5])
+
 
 class TestFastBlockLMSFilter:
     def test_filt(self):
