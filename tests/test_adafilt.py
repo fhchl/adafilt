@@ -8,9 +8,11 @@ from adafilt.optimal import wiener_filter
 from adafilt import (
     MultiChannelBlockLMS,
     Delay,
-    SimpleFilter,
+    FIRFilter,
     FastBlockLMSFilter,
     olafilt,
+    LMSFilter,
+    RLSFilter
 )
 
 
@@ -18,9 +20,9 @@ class TestOlafilt:
     def test_behaves_like_scipy(self):
         m = 123
         n = 1024
-        h = np.random.random(m)
-        x = np.random.random(n)
-        zi = np.random.random(m - 1)
+        h = np.random.normal(size=m)
+        x = np.random.normal(size=n)
+        zi = np.random.normal(size=m - 1)
 
         yola, zfola = olafilt(h, x, zi=zi)
         y, zf = lfilter(h, 1, x, zi=zi)
@@ -35,9 +37,9 @@ class TestOlafilt:
         m = 123
         n = 1024
         L = 7
-        h = np.random.random((m, L))
-        x = np.random.random(n)
-        zi = np.random.random((m - 1, L))
+        h = np.random.normal(size=(m, L))
+        x = np.random.normal(size=n)
+        zi = np.random.normal(size=(m - 1, L))
 
         yola, zfola = olafilt(h, x, "nl,n->nl", zi=zi)
 
@@ -50,8 +52,8 @@ class TestOlafilt:
         m = 123
         n = 1024
         L, M = (1, 3)
-        h = np.random.random((m, L, M))
-        x = np.random.random((n,))
+        h = np.random.normal(size=(m, L, M))
+        x = np.random.normal(size=(n,))
 
         yola = olafilt(h, x, "nlm,n->nl", zi=None)
         y = 0
@@ -65,9 +67,9 @@ class TestOlafilt:
         m = 123
         n = 1024
         L, M = (1, 3)
-        h = np.random.random((m, L, M))
-        x = np.random.random((n,))
-        ziall = np.random.random((m - 1, L, M))
+        h = np.random.normal(size=(m, L, M))
+        x = np.random.normal(size=(n,))
+        ziall = np.random.normal(size=(m - 1, L, M))
         zi = ziall.sum(axis=-1)
 
         yola, zfola = olafilt(h, x, "nlm,n->nl", zi=zi)
@@ -86,8 +88,8 @@ class TestOlafilt:
         n = 1024
         L, M = (10, 5)
 
-        h = np.random.random((m, L, M))
-        x = np.random.random((n,))
+        h = np.random.normal(size=(m, L, M))
+        x = np.random.normal(size=(n,))
 
         yola = olafilt(h, x, "nlm,n->nl", zi=None)
 
@@ -104,9 +106,9 @@ class TestOlafilt:
         n = 1024
         L, M = (10, 5)
 
-        x = np.random.random((n,))
-        h = np.random.random((m, L, M))
-        ziall = np.random.random((m - 1, L, M))
+        x = np.random.normal(size=(n,))
+        h = np.random.normal(size=(m, L, M))
+        ziall = np.random.normal(size=(m - 1, L, M))
         zi = ziall.sum(axis=-1)
         yola, zfola = olafilt(h, x, "nlm,n->nl", zi=zi)
 
@@ -125,9 +127,9 @@ class TestOlafilt:
         m = 123
         n = 1024
         K, L = (4, 8)
-        x = np.random.random((n, K))
-        h = np.random.random((m, L, K))
-        zi = np.random.random((m - 1, L))
+        x = np.random.normal(size=(n, K))
+        h = np.random.normal(size=(m, L, K))
+        zi = np.random.normal(size=(m - 1, L))
 
         x0 = x.copy()
         zi0 = zi.copy()
@@ -143,9 +145,9 @@ class TestOlafilt:
         m = 123
         n = 1024
         L, M, K = (4, 3, 2)
-        h = np.random.random((m, L, M))
-        x = np.random.random((n, K))
-        zi = np.random.random((m - 1, L, M, K))
+        h = np.random.normal(size=(m, L, M))
+        x = np.random.normal(size=(n, K))
+        zi = np.random.normal(size=(m - 1, L, M, K))
 
         yola, zfola = olafilt(h, x, "nlm,nk->nlmk", zi=zi)
 
@@ -162,9 +164,9 @@ class TestOlafilt:
         def test_shape(L, M, K):
             m = 123
             n = 1024
-            h = np.random.random((m, L, M, K))
-            x = np.random.random((n, K))
-            zi = np.random.random((m - 1, L, M, K))
+            h = np.random.normal(size=(m, L, M, K))
+            x = np.random.normal(size=(n, K))
+            zi = np.random.normal(size=(m - 1, L, M, K))
 
             yola, zfola = olafilt(h, x, "nlmk,nk->nlmk", zi=zi)
 
@@ -187,8 +189,8 @@ class TestOlafilt:
         def test_shape(L, M, K):
             m = 123
             n = 1024
-            h = np.random.random((m, L, M))
-            x = np.random.random((n, K))
+            h = np.random.normal(size=(m, L, M))
+            x = np.random.normal(size=(n, K))
 
             yola = olafilt(h, x, "nlm,nk->nl")
 
@@ -209,9 +211,9 @@ class TestOlafilt:
         def test_shape(L, M, K):
             m = 123
             n = 1024
-            h = np.random.random((m, L, M))
-            x = np.random.random((n, K))
-            ziall = np.random.random((m - 1, L, M, K))
+            h = np.random.normal(size=(m, L, M))
+            x = np.random.normal(size=(n, K))
+            ziall = np.random.normal(size=(m - 1, L, M, K))
             zi = ziall.sum(axis=(-1, -2))
 
             yola, zfola = olafilt(h, x, "nlm,nk->nl", zi=zi)
@@ -234,10 +236,10 @@ class TestOlafilt:
         [test_shape(L, M, K) for L in Ls for M in Ms for K in Ks]
 
 
-class TestSimpleFilter:
+class TestFIRFilter:
     def test_output_shape_1x1(self):
         h = [1, 0, 0]
-        filt = SimpleFilter(h)
+        filt = FIRFilter(h)
         x = np.random.normal(size=100)
         y = filt.filt(x)
         assert x.shape == (100,)
@@ -260,7 +262,7 @@ class TestFakeInterface:
         us = []
         ds = []
 
-        for i in range(buffers):
+        for _ in range(buffers):
             y = np.random.normal(0, 1, buffsize)
             x, e, u, d = sim.playrec(y, send_signal=True)
             xs.append(x)
@@ -299,7 +301,7 @@ class TestFakeInterface:
         us = []
         ds = []
 
-        for i in range(buffers):
+        for _ in range(buffers):
             y = np.random.normal(size=(buffsize, M))
             x, e, u, d = sim.playrec(y, send_signal=True)
             ys.append(y)
@@ -331,7 +333,7 @@ class TestFakeInterface:
         # measure primary path
         xs = []
         es = []
-        for i in range(buffers):
+        for _ in range(buffers):
             x, e, _, _ = sim.rec()
             xs.append(x)
             es.append(e)
@@ -362,7 +364,7 @@ class TestFakeInterface:
 class TestOptimal:
     def test_wiener_filter_unconstrained_causal(self):
         h = [1, -1, 0.5]
-        x = np.random.random(2 ** 16)
+        x = np.random.normal(size=2 ** 16)
         y = olafilt(h, x)
 
         h_est = -np.real(np.fft.ifft(wiener_filter(x, y, 32, constrained=False)))
@@ -370,7 +372,7 @@ class TestOptimal:
 
     def test_wiener_filter_constrained_causal(self):
         h = [1, -1, 0.5]
-        x = np.random.random(2 ** 16)
+        x = np.random.normal(size=2 ** 16)
         y = olafilt(h, x)
 
         h_est = -np.real(np.fft.ifft(wiener_filter(x, y, 32, constrained=True)))
@@ -378,7 +380,7 @@ class TestOptimal:
 
     def test_wiener_filter_constrained_noncausal(self):
         h = [1, 0, 1]
-        x = np.random.random(2 ** 16)
+        x = np.random.normal(size=2 ** 16)
         y = olafilt(h, x)
 
         h_est = -np.real(
@@ -388,7 +390,7 @@ class TestOptimal:
 
 
 class TestDelay:
-    def test_delays_properly(self):
+    def test_delay(self):
         ndelay = 10
         delay = Delay(ndelay)
         nsamp = 64
@@ -444,6 +446,42 @@ class TestDelay:
         npt.assert_array_equal(y, [0, 1, 2, 3, 4, 5])
 
 
+class TestLMSFilter:
+    def test_w(self):
+        """Finds optimal filter."""
+        w = np.arange(1, 9)
+        xs = np.random.normal(size=1024 + 8)
+        y_desired = lfilter(w, 1, xs)[8:]
+        xs = xs[8:]
+
+        filt = LMSFilter(length=8, stepsize=0.8)
+
+        for x, yd in zip(xs, y_desired):
+            y = filt.filt(x)
+            e = yd - y
+            filt.adapt(x, e)
+
+        npt.assert_almost_equal(w, filt.w)
+
+
+class TestRLSFilter:
+    def test_w(self):
+        """Finds optimal filter."""
+        w = np.arange(1, 5)
+        xs = np.random.normal(size=1024 + 8)
+        y_desired = lfilter(w, 1, xs)[8:]
+        xs = xs[8:]
+
+        filt = RLSFilter(length=4)
+
+        for x, yd in zip(xs, y_desired):
+            y = filt.filt(x)
+            e = yd - y
+            filt.adapt(x, e)
+
+        npt.assert_almost_equal(w, filt.w, decimal=5)
+
+
 class TestFastBlockLMSFilter:
     def test_filt(self):
         """FastBlockLMSFilter.filt behaves like lfilter."""
@@ -481,6 +519,27 @@ class TestFastBlockLMSFilter:
         yref = lfilter(filt.w, 1, x)
         npt.assert_almost_equal(y, yref)
 
+    def test_w(self):
+        """Finds optimal filter."""
+        length = 8
+        blocks = 128
+        blocklength = length
+        w = np.random.normal(size=length)
+        xs = np.random.normal(size=blocks * blocklength + blocklength)
+        y_desired = lfilter(w, 1, xs)[blocklength:]
+        xs = xs[blocklength:]
+
+        filt = FastBlockLMSFilter(length, blocklength, stepsize=1)
+
+        for x, yd in zip(
+            xs.reshape(blocks, blocklength),
+            y_desired.reshape(blocks, blocklength)
+        ):
+            y = filt.filt(x)
+            e = yd - y
+            filt.adapt(x, e)
+
+        npt.assert_almost_equal(w, filt.w)
 
 class TestMultiChannelBlockLMS:
     def test_single_same_as_multi_filt(self):

@@ -97,7 +97,7 @@ def olafilt(b, x, subscripts=None, zi=None):
     return res[:L_sig]
 
 
-class SimpleFilter:
+class FIRFilter:
     """A overlap-and-add Filter."""
 
     def __init__(self, w, subscripts=None, zi=None):
@@ -109,19 +109,17 @@ class SimpleFilter:
             Filter taps.
         subscripts: str or none, optional
             Defines multi-channel case with `numpy.einsum` notation. See
-            `adafilt.utils.olafilt` for details.
+            `olafilt` for details.
         zi : None or array_like, optional
             Initial filter state.
 
         """
-        w = np.asarray(w)
-        self.w = w
-        self.subscripts = subscripts
-        self.zi = zi if zi is not None else 0
+        self.w = np.asarray(w)
+        self._subscripts = subscripts
+        self._zi = zi if zi is not None else 0
 
     def __call__(self, x):
-        """See `SimpleFilter.filt`."""
-        # TODO: take out?
+        """See `FIRFilter.filt`."""
         return self.filt(x)
 
     def filt(self, x):
@@ -138,7 +136,7 @@ class SimpleFilter:
             Output signal with `y.shape[0] == x.shape[0]`.
 
         """
-        y, self.zi = olafilt(self.w, x, subscripts=self.subscripts, zi=self.zi)
+        y, self._zi = olafilt(self.w, x, subscripts=self._subscripts, zi=self._zi)
         return y
 
 
@@ -302,7 +300,7 @@ class LMSFilter(AdaptiveFilter):
         leakage=1,
         initial_coeff=None,
         normalized=True,
-        minimum_power=1e-5,
+        epsilon_power=1e-5,
     ):
         """Create sample-wise Least-Mean-Square adaptive filter object.
 
@@ -318,7 +316,7 @@ class LMSFilter(AdaptiveFilter):
             Initial filter coefficient vector. If `None` defaults to zeros.
         normalized : bool, optional
             If `True` take normalize step size with signal power.
-        minimum_power : float, optional
+        epsilon_power : float, optional
             Add this to power normalization factor to avoid instability at very small
             signal levels.
 
@@ -334,9 +332,8 @@ class LMSFilter(AdaptiveFilter):
         self.length = length
         self.stepsize = stepsize
         self.leakage = leakage
-        self.minimum_power = minimum_power
+        self.epsilon_power = epsilon_power
         self.normalized = normalized
-        self.locked = False
 
         self.reset()
 
@@ -353,18 +350,17 @@ class LMSFilter(AdaptiveFilter):
 
         Parameters
         ----------
-        x : float
+        x : complex
             Reference signal.
 
         Returns
         -------
-        y : float
+        y : complex
             Filter output.
 
         """
-        x = float(x)
         fifo_append_left(self._xfiltbuff, x)
-        y = np.dot(self.w, self._xfiltbuff)
+        y = self.w.conj().dot(self._xfiltbuff)
         return y
 
     def adapt(self, x, e):
@@ -372,28 +368,21 @@ class LMSFilter(AdaptiveFilter):
 
         Parameters
         ----------
-        x : float
+        x : complex
             Reference signal.
-        e : float
-            Error signal.
+        e : complex
+            Error signal, e.g. `d - y`.
 
         """
-        x = float(x)
-        e = float(e)
-
         fifo_append_left(self._xbuff, x)
-
-        if self.locked:
-            return
-
-        xvec = np.array(self._xbuff)
+        xvec = np.asarray(self._xbuff)
 
         if self.normalized:
-            stepsize = self.stepsize / (np.dot(xvec, xvec) + self.minimum_power)
+            stepsize = self.stepsize / (np.dot(xvec, xvec) + self.epsilon_power)
         else:
             stepsize = self.stepsize
 
-        self.w = self.leakage * self.w - stepsize * xvec * np.conj(e)
+        self.w = self.leakage * self.w + stepsize * xvec * np.conj(e)
 
 
 class FastBlockLMSFilter(AdaptiveFilter):
@@ -407,7 +396,7 @@ class FastBlockLMSFilter(AdaptiveFilter):
         leakage=1,
         power_averaging=0.5,
         initial_coeff=None,
-        minimum_power=1e-5,
+        epsilon_power=1e-5,
         constrained=True,
         normalized=True,
     ):
@@ -431,7 +420,7 @@ class FastBlockLMSFilter(AdaptiveFilter):
             Initial filter coefficient vector. If `None` defaults to zeros.
         initial_power : float, optional
             initial signal power.
-        minimum_power : float, optional
+        epsilon_power : float, optional
             Add this to power normalization factor to avoid instability at very small
             signal levels.
         constrained : bool, optional
@@ -446,15 +435,6 @@ class FastBlockLMSFilter(AdaptiveFilter):
         tracking capabilities, but will not necessarily be optimal in terms of final
         mean square error (Hansen, p. 419)
 
-        TODO:
-        - Gain or power constraints on filters
-          (rafaelyComputationallyEfficientFrequencydomain2000)
-        - Unbiased normalized algorithm
-          (elliottFrequencydomainAdaptationCausal2000)
-        - Faster?: Soo, J-S., and Khee K. Pang. "Multidelay block frequency domain
-        adaptive filter." IEEE Transactions on Acoustics, Speech, and Signal Processing
-        38.2 (1990): 373-376.
-
         """
         assert length >= blocklength, "Filter must be at least as long as block"
 
@@ -463,8 +443,7 @@ class FastBlockLMSFilter(AdaptiveFilter):
         self.power_averaging = power_averaging
         self.constrained = constrained
         self.normalized = normalized
-        self.locked = False
-        self.minimum_power = minimum_power
+        self.epsilon_power = epsilon_power
 
         if length is None:
             length = blocklength
@@ -551,12 +530,9 @@ class FastBlockLMSFilter(AdaptiveFilter):
                 + (1 - self.power_averaging) * np.abs(X) ** 2
             )
             # normalization factor
-            D = 1 / (self._P + self.minimum_power)
+            D = 1 / (self._P + self.epsilon_power)
         else:
             D = 1
-
-        if self.locked:
-            return
 
         update = D * X.conj() * E
 
@@ -568,7 +544,7 @@ class FastBlockLMSFilter(AdaptiveFilter):
             update = np.fft.rfft(U)
 
         # filter weight adaptation
-        self.W = self.leakage * self.W - self.stepsize * update
+        self.W = self.leakage * self.W + self.stepsize * update
 
 
 class MultiChannelBlockLMS(AdaptiveFilter):
@@ -587,7 +563,7 @@ class MultiChannelBlockLMS(AdaptiveFilter):
         constrained=True,
         normalized='sum_errors',
         power_averaging=0.5,
-        minimum_power=1e-5
+        epsilon_power=1e-5
     ):
         """Create multi-channel block-wise LMS adaptive filter object."""
         assert length >= blocklength, "`length` must larger or equal `blocklength`"
@@ -599,11 +575,10 @@ class MultiChannelBlockLMS(AdaptiveFilter):
         self.blocklength = blocklength
         self.stepsize = stepsize
         self.constrained = constrained
-        self.locked = False
         self.normalized = normalized
         self.leakage = leakage
         self.power_averaging = power_averaging
-        self.minimum_power = minimum_power
+        self.epsilon_power = epsilon_power
 
         self._num_saved_blocks = length // blocklength
 
@@ -763,12 +738,9 @@ class MultiChannelBlockLMS(AdaptiveFilter):
                 self.power_averaging * self._P
                 + (1 - self.power_averaging) * power
             )
-            D = 1 / (self._P + self.minimum_power)  # normalization factor
+            D = 1 / (self._P + self.epsilon_power)  # normalization factor
         else:
             D = 1
-
-        if self.locked:
-            return
 
         update = np.einsum("nlmk,nl->nmk", D * X.conj(), E)
 
@@ -777,4 +749,72 @@ class MultiChannelBlockLMS(AdaptiveFilter):
             ut[self.length :] = 0
             update = np.fft.rfft(ut, axis=0)
 
-        self.W = self.leakage * self.W - self.stepsize * update  # update filter
+        self.W = self.leakage * self.W + self.stepsize * update  # update filter
+
+
+class RLSFilter(LMSFilter):
+    """A sample-wise recursive Least-Squares adaptive filter."""
+
+    def __init__(
+        self,
+        length,
+        lamb=0.99,
+        initial_covariance=1000,
+        initial_coeff=None,
+    ):
+        """Create sample-wise recursive Least-Squares adaptive filter object.
+
+        Parameters
+        ----------
+        length : int > 0
+            Number of filter taps.
+        lamb : float > 0, <= 1, optional
+            Forgetting factor.
+        initial_covariance : float > 0 or np.ndarray [shape=(length,length)], optional
+            Initial covariance of the filter coefficients `w`. If float, initialize as diagonal matrix.
+        initial_coeff : np.ndarray [shape=(length,)], optional
+            Initial filter coefficients. If `None`, initialize with zeros.
+
+        """
+        assert initial_covariance > 0
+        assert 0 < lamb and lamb <= 1
+        self.length = length
+        self.lamb = lamb
+        self.initial_covariance = initial_covariance
+        self.reset()
+
+        if initial_coeff is not None:
+            self.w[:] = initial_coeff
+
+    def reset(self):
+        self.w = np.zeros(self.length)
+        self._xfiltbuff = np.zeros(self.length)
+        self._xbuff = np.zeros(self.length)
+        if isinstance(self.initial_covariance, float):
+            self._P = np.eye(self.length) *  self.initial_covariance
+        elif self.initial_covariance.shape == (self.length, self.length):
+            self._P = self.initial_covariance
+        else:
+            raise ValueError('Invalid value for initial_covariance.')
+
+    def adapt(self, x, e):
+        """Adaptation step.
+
+        Parameters
+        ----------
+        x : complex
+            Reference signal.
+        e : complex
+            Error signal, i.e. difference between desired signal and filter output (`d - y`).
+
+        """
+        fifo_append_left(self._xbuff, x)
+        u = self._xbuff[:, None]
+
+        uP = u.conj().T @ self._P
+        # Gain
+        k = self._P @ u / (self.lamb + uP @ u)
+        # filter update
+        self.w += k[:, 0] * e.conj()
+        # covariance update
+        self._P = (self._P - k @ uP) / self.lamb

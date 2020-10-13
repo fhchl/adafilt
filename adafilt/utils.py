@@ -1,11 +1,4 @@
 import numpy as np
-import warnings
-
-
-def lfilter(b, a, x, zi=None):
-    """Wrap olafilt as scipy.signal.lfilter."""
-    warnings.warn("lfilter is deprecated.", DeprecationWarning)
-    return olafilt(b, x, zi=zi)
 
 
 def atleast_2d(a):

@@ -48,7 +48,7 @@ def static_filter(p, g, n=None, squeeze=True):
 
 
 def wiener_filter(x, d, n, g=None, constrained=False):
-    """Compute optimal wiener filter for single channel control.
+    """Compute optimal wiener filter for single-channel control.
 
     From Elliot, Signal Processing for Optimal Control, Eq. 3.3.26
 
@@ -96,7 +96,7 @@ def wiener_filter(x, d, n, g=None, constrained=False):
     Gall = G / Gmin
 
     # spectral factor
-    # NOTE: couuld also use https://github.com/RJTK/spectral_factorization/blob/master/spectral_factorization.py
+    # NOTE: could also use https://github.com/RJTK/spectral_factorization/blob/master/spectral_factorization.py
     F = np.exp(np.fft.fft(c * np.fft.ifft(np.log(Sxx), n=n), n=n))
 
     h = np.ones(n)
@@ -105,7 +105,7 @@ def wiener_filter(x, d, n, g=None, constrained=False):
 
 
 def multi_channel_wiener_filter(x, d, n, g=None, beta=0):
-    """Compute multichannel optimal wiener filter.
+    """Compute optimal wiener filter for multi-channel control.
 
     From Elliot, Signal Processing for Optimal Control, Eq. 5.3.31
 
@@ -120,7 +120,7 @@ def multi_channel_wiener_filter(x, d, n, g=None, beta=0):
     g : None or array_like, shape (N3[, L[, M]]), optional
         Secondary path impulse response.
     beta: float
-        Regularize through reference noise.
+        Variance of added white noise to reference signals for regularization.
 
     Returns
     -------
