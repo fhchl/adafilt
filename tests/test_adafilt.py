@@ -660,3 +660,18 @@ class TestMultiChannelBlockLMS:
                     yref[:, m] += lfilter(w[:, m, k], 1, x[:, k])
 
             npt.assert_almost_equal(y, yref, err_msg=f"shape: {(M, K)}")  # like lfiter
+
+
+from adafilt.static import least_squares
+
+class TestStatic:
+
+    def test_least_squares(self):
+        for N, M in ((10, 3), (1024, 64), (48000, 128)):
+            for chop in (False, True):
+                x = np.random.normal(size=N+M-1)
+                h = np.random.normal(size=M)
+                y = np.convolve(h, x, 'full')[:len(x)] # make same length
+
+                hest = least_squares(x, y, M, chop)
+                npt.assert_allclose(h, hest, atol=1e-12, err_msg=f'N={N}, M={M}')

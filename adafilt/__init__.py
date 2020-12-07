@@ -790,7 +790,7 @@ class RLSFilter(LMSFilter):
         self.w = np.zeros(self.length)
         self._xfiltbuff = np.zeros(self.length)
         self._xbuff = np.zeros(self.length)
-        if isinstance(self.initial_covariance, float):
+        if isinstance(self.initial_covariance, (float, int)):
             self._P = np.eye(self.length) *  self.initial_covariance
         elif self.initial_covariance.shape == (self.length, self.length):
             self._P = self.initial_covariance
@@ -818,3 +818,40 @@ class RLSFilter(LMSFilter):
         self.w += k[:, 0] * e.conj()
         # covariance update
         self._P = (self._P - k @ uP) / self.lamb
+
+
+class KalmanFilter():
+
+    def init(self, A=None, B=None, H=None, Q=None, R=None, x=None, P=None):
+        self.x = x  # state estimate
+        self.P = P  # a priori error covariance
+        self.A = A  # state transition model
+        self.B = B  # control model
+        self.H = H  # measurement model
+        self.Q = Q  # process noise covariance
+        self.R = R  # measurement noise covariance
+
+    def update(self, z):
+        K = np.solve(self.H @ self.P @ self.H.T + self.R, self.P @ self.H.T)  # Kalman gain
+        self.x = self.x + K @ (z - self.H @ self.x)  # a posteriori state estimate
+        self.P = (1 - K @ self.H) @ self.P  # a posteriori error covariance estimate
+
+    def predict(self, u, A=None, B=None):
+        if A is not None:
+            self.A = A
+        if B is not None:
+            self.B = B
+
+        self.x = self.A @ self.x + self.B @ u    # a priori state estimate
+        self.P = self.A @ self.P @ A.T + self.Q  # a priori error covariance estimate
+
+def kalman_filter_predict(x, u, A, B, P, Q):
+    x = A @ x + B @ u    # a priori state estimate
+    P = A @ P @ A.T + Q  # a priori error covariance estimate
+    return x, P
+
+def kalman_filter_update(x, z, H, P, R):
+    K = np.linalg.solve(H @ P @ H.T + R, P @ H.T)  # Kalman gain
+    x = x + K @ (z - H @ x)  # a posteriori state estimate
+    P = (1 - K @ H) @ P  # a posteriori error covariance estimate
+    return x, P
