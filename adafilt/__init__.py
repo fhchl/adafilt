@@ -820,38 +820,33 @@ class RLSFilter(LMSFilter):
         self._P = (self._P - k @ uP) / self.lamb
 
 
-class KalmanFilter():
+class KalmanFilter:
+    """Kalman Filter.
 
-    def init(self, A=None, B=None, H=None, Q=None, R=None, x=None, P=None):
+    TODO: batch mode
+    TODO: test for convolution system. use toeplitz solvers
+    TODO: square root implementation
+    TODO:
+    """
+
+    def __init__(self, x=None, P=None, A=None, Q=None, H=None, R=None):
         self.x = x  # state estimate
         self.P = P  # a priori error covariance
         self.A = A  # state transition model
-        self.B = B  # control model
-        self.H = H  # measurement model
         self.Q = Q  # process noise covariance
+        self.H = H  # measurement model
         self.R = R  # measurement noise covariance
 
-    def update(self, z):
-        K = np.solve(self.H @ self.P @ self.H.T + self.R, self.P @ self.H.T)  # Kalman gain
-        self.x = self.x + K @ (z - self.H @ self.x)  # a posteriori state estimate
-        self.P = (1 - K @ self.H) @ self.P  # a posteriori error covariance estimate
-
-    def predict(self, u, A=None, B=None):
+    def predict(self, A=None):
         if A is not None:
             self.A = A
-        if B is not None:
-            self.B = B
 
-        self.x = self.A @ self.x + self.B @ u    # a priori state estimate
-        self.P = self.A @ self.P @ A.T + self.Q  # a priori error covariance estimate
+        self.x = self.A @ self.x # a priori state estimate
+        self.P = self.A @ self.P @ self.A.T + self.Q  # a priori error covariance estimate
 
-def kalman_filter_predict(x, u, A, B, P, Q):
-    x = A @ x + B @ u    # a priori state estimate
-    P = A @ P @ A.T + Q  # a priori error covariance estimate
-    return x, P
-
-def kalman_filter_update(x, z, H, P, R):
-    K = np.linalg.solve(H @ P @ H.T + R, P @ H.T)  # Kalman gain
-    x = x + K @ (z - H @ x)  # a posteriori state estimate
-    P = (1 - K @ H) @ P  # a posteriori error covariance estimate
-    return x, P
+    def update(self, y):
+        v = (y - self.H @ self.x)  # error
+        S = self.H @ self.P @ self.H.T + self.R  # error covariance
+        K = self.P @ self.H.T @ np.linalg.inv(S)  # Kalman gain
+        self.x = self.x + K @ v  # a posteriori state estimate
+        self.P = self.P - K @ S @ K.T  # a posteriori error covariance estimate
