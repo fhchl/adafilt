@@ -790,7 +790,7 @@ class RLSFilter(LMSFilter):
         self.w = np.zeros(self.length)
         self._xfiltbuff = np.zeros(self.length)
         self._xbuff = np.zeros(self.length)
-        if isinstance(self.initial_covariance, float):
+        if isinstance(self.initial_covariance, (int, float)):
             self._P = np.eye(self.length) *  self.initial_covariance
         elif self.initial_covariance.shape == (self.length, self.length):
             self._P = self.initial_covariance
