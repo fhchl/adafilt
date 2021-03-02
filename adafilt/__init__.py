@@ -152,7 +152,7 @@ class Delay:
             Delay by `n_delay` samples.
         n_sig : int
             Number of channels.
-        zi : array_like or None, optional
+        zi : numpy.ndarray, shape (n_delay, [n_sig]) or None, optional
             Initial filter condition.
 
         """

@@ -3,6 +3,8 @@ import numpy as np
 import numpy.testing as npt
 from scipy.signal import lfilter
 
+from context import adafilt
+
 from adafilt.io import FakeInterface
 from adafilt.optimal import wiener_filter
 from adafilt import (
