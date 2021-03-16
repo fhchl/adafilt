@@ -56,24 +56,27 @@ def olafilt(b, x, subscripts=None, zi=None):
     L_I = b.shape[0]
     L_sig = x.shape[0]
 
+    # TODO: use more optimal choice of FFT size
+    #       (https://en.wikipedia.org/wiki/Overlap%E2%80%93save_method#Efficiency_considerations)
     # find power of 2 larger that 2*L_I (from abarnert on Stackoverflow)
     L_F = int(2 << (L_I - 1).bit_length())  # FFT Size
     L_S = L_F - L_I + 1  # length of segments
     offsets = range(0, L_sig, L_S)
 
-    if subscripts is None:
-        outshape = L_sig + L_F
-    else:
-        outshape = (L_sig + L_F, *einsum_outshape(subscripts, b, x)[1:])
+    outshape = (L_sig + L_F,)
+    if subscripts is not None:
+        outshape += einsum_outshape(subscripts, b, x)[1:]
 
     # handle complex or real input
     if np.iscomplexobj(b) or np.iscomplexobj(x):
         fft_func = np.fft.fft
         ifft_func = np.fft.ifft
+        C = np.zeros((L_F,) + outshape[1:], dtype=np.complex128)
         res = np.zeros(outshape, dtype=np.complex128)
     else:
         fft_func = np.fft.rfft
         ifft_func = np.fft.irfft
+        C = np.zeros((L_F // 2 + 1,) + outshape[1:], dtype=np.complex128)
         res = np.zeros(outshape)
 
     B = fft_func(b, n=L_F, axis=0)
@@ -84,9 +87,9 @@ def olafilt(b, x, subscripts=None, zi=None):
 
         if subscripts is None:
             # fast 1D case
-            C = B * Xseg
+            C[:] = B * Xseg
         else:
-            C = np.einsum(subscripts, B, Xseg)
+            C[:] = np.einsum(subscripts, B, Xseg)
 
         res[n : n + L_F] += ifft_func(C, axis=0)
 
