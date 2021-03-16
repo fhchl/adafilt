@@ -7,7 +7,7 @@ from adafilt.utils import (atleast_2d, atleast_4d, fifo_append_left,
 
 
 def olafilt(b, x, subscripts=None, zi=None):
-    """Filter a multi dimensional array with an FIR filter matrix.
+    """Efficiently filter a long signal with a FIR filter using overlap-add.
 
     Filter a data sequence, `x`, using a FIR filter given in `b`.
     Filtering uses the overlap-add method converting both `x` and `b`
@@ -53,17 +53,17 @@ def olafilt(b, x, subscripts=None, zi=None):
     if (b.ndim > 1 or x.ndim > 1) and subscripts is None:
         raise ValueError("Supply `subscripts` argument for multi-channel filtering.")
 
-    L_I = b.shape[0]
-    L_sig = x.shape[0]
+    M = b.shape[0]
+    Nx = x.shape[0]
 
     # TODO: use more optimal choice of FFT size
     #       (https://en.wikipedia.org/wiki/Overlap%E2%80%93save_method#Efficiency_considerations)
     # find power of 2 larger that 2*L_I (from abarnert on Stackoverflow)
-    L_F = int(2 << (L_I - 1).bit_length())  # FFT Size
-    L_S = L_F - L_I + 1  # length of segments
-    offsets = range(0, L_sig, L_S)
+    N = int(2 << (M - 1).bit_length())  # FFT Size
+    step_size = N - M + 1               # length of segments /
+    offsets = range(0, Nx, step_size)
 
-    outshape = (L_sig + L_F,)
+    outshape = (Nx + N,)
     if subscripts is not None:
         outshape += einsum_outshape(subscripts, b, x)[1:]
 
@@ -71,19 +71,19 @@ def olafilt(b, x, subscripts=None, zi=None):
     if np.iscomplexobj(b) or np.iscomplexobj(x):
         fft_func = np.fft.fft
         ifft_func = np.fft.ifft
-        C = np.zeros((L_F,) + outshape[1:], dtype=np.complex128)
+        C = np.zeros((N,) + outshape[1:], dtype=np.complex128)
         res = np.zeros(outshape, dtype=np.complex128)
     else:
         fft_func = np.fft.rfft
         ifft_func = np.fft.irfft
-        C = np.zeros((L_F // 2 + 1,) + outshape[1:], dtype=np.complex128)
+        C = np.zeros((N // 2 + 1,) + outshape[1:], dtype=np.complex128)
         res = np.zeros(outshape)
 
-    B = fft_func(b, n=L_F, axis=0)
+    B = fft_func(b, n=N, axis=0)
 
     # overlap and add
     for n in offsets:
-        Xseg = fft_func(x[n : n + L_S], n=L_F, axis=0)
+        Xseg = fft_func(x[n : n + step_size], n=N, axis=0)
 
         if subscripts is None:
             # fast 1D case
@@ -91,13 +91,13 @@ def olafilt(b, x, subscripts=None, zi=None):
         else:
             C[:] = np.einsum(subscripts, B, Xseg)
 
-        res[n : n + L_F] += ifft_func(C, axis=0)
+        res[n : n + N] += ifft_func(C, axis=0)
 
     if zi is not None:
-        res[: L_I - 1] = res[: L_I - 1] + zi
-        return res[:L_sig], res[L_sig : L_sig + L_I - 1]
+        res[: M - 1] += zi
+        return res[:Nx], res[Nx : Nx + M - 1]
 
-    return res[:L_sig]
+    return res[:Nx]
 
 
 class FIRFilter:
