@@ -3,18 +3,19 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from adafilt import FastBlockLMSFilter, SimpleFilter
+from adafilt import FastBlockLMSFilter, FIRFilter
 from adafilt.io import FakeInterface
 from adafilt.utils import wgn
 
+import warnings
+warnings.filterwarnings(action="error", category=np.ComplexWarning)
 
 def moving_rms(x, N):
     return np.sqrt(np.convolve(x ** 2, np.ones((N,)) / N, mode="valid"))
 
-
 length = 64  # number of adaptive FIR filter taps
 blocklength = 4  # length of I/O buffer and blocksize of filter
-n_buffers = 50000  # size of simulation
+n_buffers = 10000  # size of simulation
 estimation_phase = 2000
 
 # primary and secondary paths
@@ -22,9 +23,6 @@ h_pri = np.zeros(64)
 h_pri[60] = 1
 h_sec = np.zeros(64)
 h_sec[20] = 1
-
-# the optimal filter
-wopt = -np.fft.ifft(np.fft.fft(h_pri) / np.fft.fft(np.roll(h_sec, blocklength)))
 
 # simulates an audio interface with primary and secondary paths and 40 dB SNR noise
 # at the error sensor
@@ -40,7 +38,7 @@ filt = FastBlockLMSFilter(
 filt.locked = True
 
 # secondary path estimate has to account for block size
-plant_model = SimpleFilter(np.zeros(blocklength + length))
+plant_model = FIRFilter(np.zeros(blocklength + length))
 
 # adaptive plant model
 adaptive_plant_model = FastBlockLMSFilter(
@@ -68,35 +66,23 @@ for i in range(n_buffers):
         adaptive_plant_model.stepsize = 0.0001
 
     # record reference signal x and error signal e while playing back y
-    # if i > 100:
-    #     anc = True
-    x, e, u, d = sim.playrec(y + v)
-
+    x, e, u, d = sim.playrec(- y + v)
     # adaptive plant model prediction
     y_p = adaptive_plant_model.filt(v)
-
     # plant estimation error
-    e_p = y_p - e
-
+    e_p = e - y_p
     # adapt plant model
     adaptive_plant_model.adapt(v, e_p)
-
     # copy plant model
     plant_model.w[blocklength:] = adaptive_plant_model.w
-
     # filter the reference signal
     fx = plant_model(x)
 
-    # adapt filter
-    filt.adapt(fx, e)
-
-    # filter
-    y = filt.filt(x)
-
-    if i < estimation_phase:
-        y = np.zeros(x.shape)
-    else:
-        filt.locked = False
+    if i >= estimation_phase:
+        # adapt filter
+        filt.adapt(fx, e)
+        # filter
+        y = filt.filt(x)
 
     ulog.append(u)
     dlog.append(d)
@@ -132,8 +118,11 @@ ax[2].set_xlabel("Sample")
 ax[2].set_ylabel("Error [dB]")
 ax[2].legend()
 
+# the optimal filter
+wopt = -np.fft.irfft(np.fft.rfft(h_pri) / np.fft.rfft(np.roll(h_sec, blocklength)))
+
 ax[3].set_title("Final filter")
-ax[3].plot(filt.w, "x", label="control filter")
+ax[3].plot(-filt.w, "x", label="control filter")
 ax[3].plot(wopt, "+", label="optimal filter")
 ax[3].plot(plant_model.w[blocklength:], "o", label="plant model")
 ax[3].plot(h_sec, label="plant")
@@ -146,7 +135,7 @@ ax[4].plot(np.concatenate(fxlog), label="fx", alpha=0.8)
 ax[4].set_xlabel("Sample")
 ax[4].legend()
 
-pri_path_error = np.sum((wopt - wlog) ** 2, axis=1) / np.sum((h_pri) ** 2)
+pri_path_error = np.sum((wopt + wlog) ** 2, axis=1) / np.sum((wopt) ** 2)
 sec_path_error = np.sum((h_sec - glog) ** 2, axis=1) / np.sum((h_sec) ** 2)
 ax[5].set_title("Filtered reference and primary disturbance")
 ax[5].plot(

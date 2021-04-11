@@ -1,4 +1,4 @@
-"""A filtered-reference Least-Mean-Square (FxLMS) filter."""
+"""Linear system identification"""
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -26,31 +26,25 @@ wslog = []
 ylog = []
 
 for i in range(n_buffers):
-
     # identification noise
     u = np.random.normal(0, 1, blocklength)
-
-    # record error signal e
-    _, d, _, _ = sim.playrec(u)
-
+    # record system output y
+    _, y, _, _ = sim.playrec(u)
     # filter prediction
-    y = filt.filt(u)
-
+    yhat = filt.filt(u)
     # error signal
-    e = y - d
-
+    e = y - yhat
     # weight adaptation
     filt.adapt(u, e)
-
     # relative filter error
     fe = np.sum((h - filt.w) ** 2) / np.sum((h) ** 2)
-
+    # log
     elog.append(e)
     felog.append(fe)
     ylog.append(u)
     wslog.append(filt.w)
 
-
+# plot
 fig, ax = plt.subplots(ncols=2, nrows=2, figsize=(14, 8), constrained_layout=True)
 
 ax[0, 0].set_title("Signals")
@@ -63,12 +57,10 @@ ax[0, 1].set_title("Filter weights")
 ax[0, 1].plot(wslog)
 ax[0, 1].set_xlabel("Block")
 
-
 ax[1, 0].set_title("Error")
 ax[1, 0].plot(10 * np.log10(felog))
 ax[1, 0].set_xlabel("Sample")
 ax[1, 0].set_ylabel("Error [dB]")
-
 
 ax[1, 1].set_title("Final filter")
 ax[1, 1].plot(filt.w, label="estimate")

@@ -3,9 +3,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from adafilt import FastBlockLMSFilter, SimpleFilter
+from adafilt import FastBlockLMSFilter, FIRFilter, olafilt
 from adafilt.io import FakeInterface
-from adafilt.utils import olafilt, wgn
+from adafilt.utils import wgn
 
 length = 512  # number of adaptive FIR filter taps
 blocklength = 128  # length of I/O buffer and blocksize of filter
@@ -36,7 +36,7 @@ sim = FakeInterface(
 )
 
 # secondary path estimate has to account for block size
-plant_model = SimpleFilter(np.concatenate((np.zeros(blocklength), h_sec)))
+plant_model = FIRFilter(np.concatenate((np.zeros(blocklength), h_sec)))
 
 # aggregate signals during simulation
 xlog = []
@@ -46,16 +46,12 @@ ylog = []
 
 y = np.zeros(blocklength)  # control signal is zero for first block
 for i in range(n_buffers):
-
     # record reference signal x and error signal e while playing back y
-    x, e, _, _ = sim.playrec(y)
-
+    x, e, _, _ = sim.playrec(-y)
     # filter the reference signal
     fx = plant_model(x)
-
     # adapt filter
     filt.adapt(fx, e)
-
     # filter
     y = filt.filt(x)
 
@@ -64,7 +60,7 @@ for i in range(n_buffers):
     ylog.append(y.copy())
     wslog.append(filt.w)
 
-
+# plot
 fig, ax = plt.subplots(ncols=2, nrows=2, figsize=(14, 8), constrained_layout=True)
 
 ax[0, 0].set_title("Signals")
@@ -78,12 +74,10 @@ ax[0, 1].set_title("Filter weights")
 ax[0, 1].plot(wslog)
 ax[0, 1].set_xlabel("Block")
 
-
 ax[1, 0].set_title("Error Energy")
 ax[1, 0].plot(10 * np.log10(np.array(np.concatenate(elog)) ** 2))
 ax[1, 0].set_xlabel("Sample")
 ax[1, 0].set_ylabel("Error [dB]")
-
 
 ax[1, 1].set_title("Final filter")
 ax[1, 1].plot(filt.w)
