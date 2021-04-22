@@ -756,7 +756,9 @@ class MultiChannelBlockLMS(AdaptiveFilter):
 
 
 class RLSFilter(LMSFilter):
-    """A sample-wise recursive Least-Squares adaptive filter."""
+    """A sample-wise recursive Least-Squares adaptive filter.
+
+    After Haykin Table 10.1"""
 
     def __init__(
         self,
@@ -813,11 +815,10 @@ class RLSFilter(LMSFilter):
         """
         fifo_append_left(self._xbuff, x)
         u = self._xbuff[:, None]
-
-        uP = u.conj().T @ self._P
+        laminvPu = self._P @ u / self.lamb
         # Gain
-        k = self._P @ u / (self.lamb + uP @ u)
+        k = laminvPu / (1 + u.conj().T @ laminvPu)
         # filter update
         self.w += k[:, 0] * e.conj()
         # covariance update
-        self._P = (self._P - k @ uP) / self.lamb
+        self._P = (self._P/self.lamb - k @ laminvPu.conj().T)
