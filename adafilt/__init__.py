@@ -756,18 +756,19 @@ class MultiChannelBlockLMS(AdaptiveFilter):
 
 
 class RLSFilter(LMSFilter):
-    """A sample-wise recursive Least-Squares adaptive filter.
+    """A recursive Least-Squares filter.
 
     After Haykin Table 10.1"""
 
     def __init__(
         self,
         length,
-        lamb=0.99,
-        initial_covariance=1000,
+        lamb=1,
+        initial_covariance=1,
         initial_coeff=None,
+        meas_noise_var=1
     ):
-        """Create sample-wise recursive Least-Squares adaptive filter object.
+        """Create recursive Least-Squares filter object.
 
         Parameters
         ----------
@@ -775,17 +776,22 @@ class RLSFilter(LMSFilter):
             Number of filter taps.
         lamb : float > 0, <= 1, optional
             Forgetting factor.
-        initial_covariance : float > 0 or np.ndarray [shape=(length,length)], optional
+        initial_covariance : float > 0 or np.ndarray [shape=(length)], optional
             Initial covariance of the filter coefficients `w`. If float, initialize as diagonal matrix.
-        initial_coeff : np.ndarray [shape=(length,)], optional
+        initial_coeff : np.ndarray [shape=(length)], optional
             Initial filter coefficients. If `None`, initialize with zeros.
+        meas_noise_var : float > 0, optinal
+            Measurement noise variance
 
         """
         assert initial_covariance > 0
+        assert meas_noise_var >= 0
         assert 0 < lamb and lamb <= 1
         self.length = length
         self.lamb = lamb
         self.initial_covariance = initial_covariance
+        self.meas_noise_var = meas_noise_var
+        self.blocklength = 1
         self.reset()
 
         if initial_coeff is not None:
@@ -797,8 +803,8 @@ class RLSFilter(LMSFilter):
         self._xbuff = np.zeros(self.length)
         if isinstance(self.initial_covariance, (int, float)):
             self._P = np.eye(self.length) *  self.initial_covariance
-        elif self.initial_covariance.shape == (self.length, self.length):
-            self._P = self.initial_covariance
+        elif self.initial_covariance.size == self.length:
+            self._P = np.diag(self.initial_covariance)
         else:
             raise ValueError('Invalid value for initial_covariance.')
 
@@ -817,8 +823,8 @@ class RLSFilter(LMSFilter):
         u = self._xbuff[:, None]
         laminvPu = self._P @ u / self.lamb
         # Gain
-        k = laminvPu / (1 + u.conj().T @ laminvPu)
+        k = laminvPu / (self.meas_noise_var + u.conj().T @ laminvPu)
         # filter update
         self.w += k[:, 0] * e.conj()
         # covariance update
-        self._P = (self._P/self.lamb - k @ laminvPu.conj().T)
+        self._P[:] = (self._P/self.lamb - k @ laminvPu.conj().T)
