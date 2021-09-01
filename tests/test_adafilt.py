@@ -470,19 +470,18 @@ class TestRLSFilter:
     def test_w(self):
         """Finds optimal filter."""
         w = np.arange(1, 9)
-        xs = np.random.normal(size=2048 + 8)
-        y_desired = lfilter(w, 1, xs)[8:]
-        xs = xs[8:]
+        xs = np.random.normal(size=9)
+        ys = lfilter(w, 1, xs)
+        xs = xs
 
-        filt = RLSFilter(length=8)
+        filt = RLSFilter(length=len(w))
 
-        for x, yd in zip(xs, y_desired):
+        for x, yd in zip(xs, ys):
             y = filt.filt(x)
             e = yd - y
             filt.adapt(x, e)
 
-        # NOTE: lms can be much more accurate with enough data and no noise
-        npt.assert_almost_equal(w, filt.w, decimal=2)
+        npt.assert_almost_equal(w, filt.w, decimal=8)
 
 
 class TestFastBlockLMSFilter:
