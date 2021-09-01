@@ -475,7 +475,7 @@ class FastBlockLMSFilter(AdaptiveFilter):
 
     def reset(self):
         self._P = 0
-        self.W = np.zeros((2 * self.length) // 2 + 1, dtype=complex)
+        self.W = np.zeros(self.length + 1, dtype=complex)
         self._xfiltbuff = np.zeros(2 * self.length)
         self._xbuff = np.zeros(2 * self.length)
         self._ebuff = np.zeros(self.length)
@@ -748,7 +748,7 @@ class MultiChannelBlockLMS(AdaptiveFilter):
         update = np.einsum("nlmk,nl->nmk", D * X.conj(), E)
 
         if self.constrained:  # make it causal
-            ut = np.fft.irfft(update, axis=0)
+            ut = np.fft.irfft(update, axis=0)  #FIXME: pass n to all irffts
             ut[self.length :] = 0
             update = np.fft.rfft(ut, axis=0)
 
