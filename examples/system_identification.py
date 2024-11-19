@@ -1,10 +1,10 @@
 """Linear system identification"""
 
-import numpy as np
 import matplotlib.pyplot as plt
-
+import numpy as np
 from adafilt import FastBlockLMSFilter
 from adafilt.io import FakeInterface
+
 
 length = 512  # number of adaptive FIR filter taps
 blocklength = 128  # length of I/O buffer and blocksize of filter

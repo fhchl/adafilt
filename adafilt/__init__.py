@@ -2,8 +2,13 @@
 
 import numpy as np
 
-from adafilt.utils import (atleast_2d, atleast_4d, fifo_append_left,
-                           fifo_extend, einsum_outshape)
+from adafilt.utils import (
+    atleast_2d,
+    atleast_4d,
+    einsum_outshape,
+    fifo_append_left,
+    fifo_extend,
+)
 
 
 def olafilt(b, x, subscripts=None, zi=None):
@@ -60,7 +65,7 @@ def olafilt(b, x, subscripts=None, zi=None):
     #       (https://en.wikipedia.org/wiki/Overlap%E2%80%93save_method#Efficiency_considerations)
     # find power of 2 larger that 2*L_I (from abarnert on Stackoverflow)
     N = int(2 << (M - 1).bit_length())  # FFT Size
-    step_size = N - M + 1               # length of segments /
+    step_size = N - M + 1  # length of segments /
     offsets = range(0, Nx, step_size)
 
     outshape = (Nx + N,)
@@ -146,7 +151,9 @@ class FIRFilter:
 class Delay:
     """A simple delay."""
 
-    def __init__(self, n_delay, n_sig=None, zi=None, blocklength=None, dtype=np.float64):
+    def __init__(
+        self, n_delay, n_sig=None, zi=None, blocklength=None, dtype=np.float64
+    ):
         """Create simple delay.
 
         Parameters
@@ -201,15 +208,19 @@ class Delay:
             self._zi[:-n:] = self._zi[n:]
             self._zi[-n:] = x
         else:
-            out[:self._n_delay] = self._zi
-            out[self._n_delay:] = x[:-self._n_delay]
-            self._zi[:] = x[-self._n_delay:]
+            out[: self._n_delay] = self._zi
+            out[self._n_delay :] = x[: -self._n_delay]
+            self._zi[:] = x[-self._n_delay :]
 
         return out
 
 
 class AdaptiveFilter:
     """Base class for adaptive filters."""
+
+    blocklength: int
+    length: int
+    w: np.ndarray
 
     def __init__(self):
         raise NotImplementedError
@@ -564,9 +575,9 @@ class MultiChannelBlockLMS(AdaptiveFilter):
         leakage=1,
         initial_coeff=None,
         constrained=True,
-        normalized='sum_errors',
+        normalized="sum_errors",
         power_averaging=0.5,
-        epsilon_power=1e-5
+        epsilon_power=1e-5,
     ):
         """Create multi-channel block-wise LMS adaptive filter object."""
         assert length >= blocklength, "`length` must larger or equal `blocklength`"
@@ -723,23 +734,20 @@ class MultiChannelBlockLMS(AdaptiveFilter):
 
         X = np.fft.rfft(self._xbuff, axis=0)
         E = np.fft.rfft(
-            np.concatenate(
-                (np.zeros((self.length, self.Nsens)), self._ebuff)
-            ),
+            np.concatenate((np.zeros((self.length, self.Nsens)), self._ebuff)),
             axis=0,
         )
 
         if self.normalized:
-            if self.normalized == 'elementwise':
+            if self.normalized == "elementwise":
                 power = np.abs(X) ** 2
-            elif self.normalized == 'sum_errors':
+            elif self.normalized == "sum_errors":
                 power = np.sum(np.abs(X) ** 2, axis=1, keepdims=True)
             else:
                 raise ValueError(f'Unknown normalization "{self.normalized}".')
 
             self._P = (
-                self.power_averaging * self._P
-                + (1 - self.power_averaging) * power
+                self.power_averaging * self._P + (1 - self.power_averaging) * power
             )
             D = 1 / (self._P + self.epsilon_power)  # normalization factor
         else:
@@ -748,7 +756,7 @@ class MultiChannelBlockLMS(AdaptiveFilter):
         update = np.einsum("nlmk,nl->nmk", D * X.conj(), E)
 
         if self.constrained:  # make it causal
-            ut = np.fft.irfft(update, axis=0)  #FIXME: pass n to all irffts
+            ut = np.fft.irfft(update, axis=0)  # FIXME: pass n to all irffts
             ut[self.length :] = 0
             update = np.fft.rfft(ut, axis=0)
 
@@ -767,7 +775,7 @@ class RLSFilter(LMSFilter):
         initial_covariance=10000,
         initial_coeff=None,
         meas_noise_var=0,
-        proc_noise_var=0
+        proc_noise_var=0,
     ):
         """Create recursive Least-Squares filter object.
 
@@ -778,7 +786,8 @@ class RLSFilter(LMSFilter):
         alpha : float >= 1, optional
             Forgetting factor.
         initial_covariance : float > 0 or np.ndarray [shape=(length)], optional
-            Initial covariance of the filter coefficients `w`. If float, initialize as diagonal matrix.
+            Initial covariance of the filter coefficients `w`. If float, initialize as 
+            diagonal matrix.
         initial_coeff : np.ndarray [shape=(length)], optional
             Initial filter coefficients. If `None`, initialize with zeros.
         meas_noise_var : float >= 0, optinal
@@ -807,11 +816,11 @@ class RLSFilter(LMSFilter):
         self._xfiltbuff = np.zeros(self.length)
         self._xbuff = np.zeros(self.length)
         if isinstance(self.initial_covariance, (int, float)):
-            self.P = np.eye(self.length) *  self.initial_covariance
+            self.P = np.eye(self.length) * self.initial_covariance
         elif self.initial_covariance.size == self.length:
             self.P = np.diag(self.initial_covariance)
         else:
-            raise ValueError('Invalid value for initial_covariance.')
+            raise ValueError("Invalid value for initial_covariance.")
 
     def adapt(self, x, e):
         """Adaptation step.
@@ -821,7 +830,7 @@ class RLSFilter(LMSFilter):
         x : complex
             Reference signal.
         e : complex
-            Error signal, i.e. difference between desired signal and filter output (`d - y`).
+            Error signal, i.e. difference of desired signal and filter output (`d - y`).
 
         """
         eps = 1e-8

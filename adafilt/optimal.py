@@ -2,6 +2,7 @@
 
 import numpy as np
 from scipy.signal import csd, welch
+
 from adafilt.utils import atleast_2d, atleast_3d
 
 
@@ -42,7 +43,7 @@ def static_filter(p, g, n=None, squeeze=True):
 
     W = np.zeros((n, M), dtype=complex)
     for i in range(n):
-        W[i] = - np.linalg.lstsq(G[i], P[i], rcond=None)[0]
+        W[i] = -np.linalg.lstsq(G[i], P[i], rcond=None)[0]
 
     return W if not squeeze else W.squeeze()
 
@@ -81,10 +82,10 @@ def wiener_filter(x, d, n, g=None, constrained=False):
     _, Sxx = welch(x, nperseg=n, return_onesided=False)
 
     if not constrained:
-        return - Sxd / Sxx / G
+        return -Sxd / Sxx / G
 
     c = np.ones(n)
-    c[n // 2:] = 0
+    c[n // 2 :] = 0
     # half at DC and Nyquist
     c[0] = 0.5
     if n % 2 == 0:
@@ -100,8 +101,8 @@ def wiener_filter(x, d, n, g=None, constrained=False):
     F = np.exp(np.fft.fft(c * np.fft.ifft(np.log(Sxx), n=n), n=n))
 
     h = np.ones(n)
-    h[n // 2:] = 0
-    return - np.fft.fft(h * np.fft.ifft(Sxd / F.conj() / Gall), n=n) / (F * Gmin)
+    h[n // 2 :] = 0
+    return -np.fft.fft(h * np.fft.ifft(Sxd / F.conj() / Gall), n=n) / (F * Gmin)
 
 
 def multi_channel_wiener_filter(x, d, n, g=None, beta=0):
@@ -153,4 +154,4 @@ def multi_channel_wiener_filter(x, d, n, g=None, beta=0):
             _, S = csd(x[:, j], d[:, i], nperseg=n, return_onesided=False)
             Sxd[:, i, j] = S
 
-    return - np.linalg.pinv(G) @ Sxd @ np.linalg.pinv(Sxx + beta * np.identity(Nin))
+    return -np.linalg.pinv(G) @ Sxd @ np.linalg.pinv(Sxx + beta * np.identity(Nin))

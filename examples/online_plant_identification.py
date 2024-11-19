@@ -1,17 +1,20 @@
 """A filtered-reference Least-Mean-Square (FxLMS) filter."""
 
-import numpy as np
-import matplotlib.pyplot as plt
+import warnings
 
+import matplotlib.pyplot as plt
+import numpy as np
 from adafilt import FastBlockLMSFilter, FIRFilter
 from adafilt.io import FakeInterface
 from adafilt.utils import wgn
 
-import warnings
+
 warnings.filterwarnings(action="error", category=np.ComplexWarning)
 
+
 def moving_rms(x, N):
-    return np.sqrt(np.convolve(x ** 2, np.ones((N,)) / N, mode="valid"))
+    return np.sqrt(np.convolve(x**2, np.ones((N,)) / N, mode="valid"))
+
 
 length = 64  # number of adaptive FIR filter taps
 blocklength = 4  # length of I/O buffer and blocksize of filter
@@ -57,7 +60,6 @@ fxlog = []
 
 y = np.zeros(blocklength)  # control signal is zero for first block
 for i in range(n_buffers):
-
     # identification noise
     if i < estimation_phase:
         v = np.random.normal(0, 1, blocklength)
@@ -66,7 +68,7 @@ for i in range(n_buffers):
         adaptive_plant_model.stepsize = 0.0001
 
     # record reference signal x and error signal e while playing back y
-    x, e, u, d = sim.playrec(- y + v)
+    x, e, u, d = sim.playrec(-y + v)
     # adaptive plant model prediction
     y_p = adaptive_plant_model.filt(v)
     # plant estimation error

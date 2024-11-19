@@ -59,7 +59,7 @@ def einsum_outshape(subscripts, *operants):
     innumber = np.concatenate([op.shape for op in operants])
     outshape = []
     for o in outsubs:
-        indices, = np.where(insubs == o)
+        (indices,) = np.where(insubs == o)
         try:
             outshape.append(innumber[indices].max())
         except ValueError:

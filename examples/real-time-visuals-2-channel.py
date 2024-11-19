@@ -7,7 +7,8 @@ import sounddevice as sd
 from adafilt import MultiChannelBlockLMS
 from vispy import app, scene
 from vispy.scene.visuals import Text
-from vispy.scene.widgets import Grid, ViewBox
+from vispy.scene.widgets import Grid
+
 
 print(sd.query_devices())
 input_device = 6
@@ -43,7 +44,6 @@ filt = MultiChannelBlockLMS(
 )
 
 i = 0
-
 
 
 class FilterMonitor:
@@ -139,6 +139,7 @@ def callback(indata, outdata, frames, time, status):
     except Exception as e:
         print(type(e).__name__ + ": " + str(e))
         raise sd.CallbackAbort
+
 
 callback_finished_event = threading.Event()
 
