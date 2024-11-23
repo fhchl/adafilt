@@ -1,3 +1,10 @@
+"""Real-time adaptive estimation ofimpulse responses between two loudspeaks and a mic.
+
+Make sure to install sounddevice, vispy + graphics backend. For example, run
+
+    pip install sounddevice vispy pyglet
+
+"""
 import sys
 import threading
 from itertools import cycle
@@ -5,25 +12,29 @@ from itertools import cycle
 import numpy as np
 import sounddevice as sd
 from adafilt import MultiChannelBlockLMS
-from vispy import app, scene
+from vispy import scene
 from vispy.scene.visuals import Text
 from vispy.scene.widgets import Grid
 
 
+# Chose your input and output devices
 print(sd.query_devices())
-input_device = 6
-output_device = 6
+input_device = 7
+output_device = 7
 device = sd.query_devices(input_device)
-print(device)
+
 samplerate = device["default_samplerate"]
-print(samplerate)
+print("samplerate = ", samplerate)
+
+# parameters
 latency = "low"
 blocksize = 2048
-T = 5
-blocks = int((T * samplerate) // blocksize)
-length = blocksize * 4
-dtype = "float32"
-channels = inch, outch = (1, 2)
+signal_duration = 5
+blocks = int((signal_duration * samplerate) // blocksize)
+filter_length = blocksize * 4
+channels = 2
+
+# Speaker signal is periodic white noise
 signal = cycle(
     np.stack(
         (
@@ -33,23 +44,22 @@ signal = cycle(
         axis=1,
     )
 )
-buffersize = 20
+
+# initialize filter
 filt = MultiChannelBlockLMS(
-    Nin=2,
-    length=length,
+    Nin=channels,
+    length=filter_length,
     blocklength=blocksize,
     leakage=0.99999999,
     stepsize=0.1,
     constrained=True,
 )
 
-i = 0
-
-
+# Wrapper for vispy figure
 class FilterMonitor:
     def __init__(self):
         # vertex positions of data to draw
-        N = length
+        N = filter_length
         self.pos1 = np.zeros((N, 2))
         self.pos2 = np.zeros((N, 2))
         self.pos1[:, 0] = np.arange(N) / samplerate
@@ -96,7 +106,10 @@ class FilterMonitor:
         # auto-scale to see the whole line.
         viewbox.camera.set_range()
 
+        self.canvas = canvas
+
     def update(self, w, load):
+        """Display current filter estimate."""
         self.pos1[:, 1] = w[:, 0, 0]
         self.pos2[:, 1] = w[:, 0, 1]
         self.line1.set_data(pos=self.pos1, color=self.color1)
@@ -110,6 +123,7 @@ e = np.zeros((blocksize, 1))
 y = np.zeros((blocksize, 1))
 
 
+# Here the filtering magic happens
 def callback(indata, outdata, frames, time, status):
     global e, y
     if status:
@@ -147,19 +161,16 @@ stream = sd.Stream(
     device=(input_device, output_device),
     samplerate=samplerate,
     blocksize=blocksize,
-    dtype=dtype,
+    dtype="float32",
     latency=latency,
-    channels=channels,
+    channels=(1, 2),
     callback=callback,
     finished_callback=callback_finished_event.set,
 )
 
 try:
     with stream:
-        app.run()
-        # callback_finished_event.wait()
+        filter_monitor.canvas.app.run()
+        callback_finished_event.wait()
 except KeyboardInterrupt:
     sys.exit(0)
-
-# plt.plot(filt.w)
-# plt.show()
