@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import numpy as np
 import numpy.testing as npt
 from adafilt import (
@@ -13,6 +12,9 @@ from adafilt import (
 from adafilt.io import FakeInterface
 from adafilt.optimal import wiener_filter
 from scipy.signal import lfilter
+
+
+np.random.seed(42)
 
 
 class TestOlafilt:
