@@ -1,4 +1,5 @@
 """Adaptive filtering classes."""
+from abc import ABC, abstractmethod
 
 import numpy as np
 
@@ -106,7 +107,7 @@ def olafilt(b, x, subscripts=None, zi=None):
 
 
 class FIRFilter:
-    """A overlap-and-add Filter."""
+    """An overlap-add Filter."""
 
     def __init__(self, w, subscripts=None, zi=None):
         """Create overlap-add filter object.
@@ -215,27 +216,24 @@ class Delay:
         return out
 
 
-class AdaptiveFilter:
+class AdaptiveFilter(ABC):
     """Base class for adaptive filters."""
 
     blocklength: int
     length: int
     w: np.ndarray
 
-    def __init__(self):
-        raise NotImplementedError
-
     def reset(self):
         """Reset filter object."""
         raise NotImplementedError
 
+    @abstractmethod
     def filt(self, x):
         """Filter a block."""
-        raise NotImplementedError
 
+    @abstractmethod
     def adapt(self, x, e):
         """Adapt to a block."""
-        raise NotImplementedError
 
     def __call__(self, x, d, sec_path_coeff=None, sec_path_est=None):
         """Compute filter output, error, and coefficients.
@@ -766,7 +764,8 @@ class MultiChannelBlockLMS(AdaptiveFilter):
 class RLSFilter(LMSFilter):
     """A recursive Least-Squares filter.
 
-    After the fading-memory filter of Simons, p. 210"""
+    After the fading-memory filter of Simons, p. 210
+    """
 
     def __init__(
         self,
@@ -786,7 +785,7 @@ class RLSFilter(LMSFilter):
         alpha : float >= 1, optional
             Forgetting factor.
         initial_covariance : float > 0 or np.ndarray [shape=(length)], optional
-            Initial covariance of the filter coefficients `w`. If float, initialize as 
+            Initial covariance of the filter coefficients `w`. If float, initialize as
             diagonal matrix.
         initial_coeff : np.ndarray [shape=(length)], optional
             Initial filter coefficients. If `None`, initialize with zeros.
