@@ -1,15 +1,10 @@
 """A filtered-reference Least-Mean-Square (FxLMS) filter."""
 
-import warnings
-
 import matplotlib.pyplot as plt
 import numpy as np
 from adafilt import FastBlockLMSFilter, FIRFilter
 from adafilt.io import FakeInterface
 from adafilt.utils import wgn
-
-
-warnings.filterwarnings(action="error", category=np.ComplexWarning)
 
 
 def moving_rms(x, N):
