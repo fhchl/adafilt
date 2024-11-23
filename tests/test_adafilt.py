@@ -1,21 +1,20 @@
-# -*- coding: utf-8 -*-
 import numpy as np
 import numpy.testing as npt
-from scipy.signal import lfilter
-
-from context import adafilt
-
+from adafilt import (
+    Delay,
+    FastBlockLMSFilter,
+    FIRFilter,
+    LMSFilter,
+    MultiChannelBlockLMS,
+    olafilt,
+    RLSFilter,
+)
 from adafilt.io import FakeInterface
 from adafilt.optimal import wiener_filter
-from adafilt import (
-    MultiChannelBlockLMS,
-    Delay,
-    FIRFilter,
-    FastBlockLMSFilter,
-    olafilt,
-    LMSFilter,
-    RLSFilter
-)
+from scipy.signal import lfilter
+
+
+np.random.seed(42)
 
 
 class TestOlafilt:
@@ -250,7 +249,6 @@ class TestFIRFilter:
 
 class TestFakeInterface:
     def test_FakeInterface_output(self):
-
         h_pri = np.random.normal(0, 1, 5)
         h_sec = np.random.normal(0, 1, 24)
         buffsize = 16
@@ -366,7 +364,7 @@ class TestFakeInterface:
 class TestOptimal:
     def test_wiener_filter_unconstrained_causal(self):
         h = [1, -1, 0.5]
-        x = np.random.normal(size=2 ** 16)
+        x = np.random.normal(size=2**16)
         y = olafilt(h, x)
 
         h_est = -np.real(np.fft.ifft(wiener_filter(x, y, 32, constrained=False)))
@@ -374,7 +372,7 @@ class TestOptimal:
 
     def test_wiener_filter_constrained_causal(self):
         h = [1, -1, 0.5]
-        x = np.random.normal(size=2 ** 16)
+        x = np.random.normal(size=2**16)
         y = olafilt(h, x)
 
         h_est = -np.real(np.fft.ifft(wiener_filter(x, y, 32, constrained=True)))
@@ -382,7 +380,7 @@ class TestOptimal:
 
     def test_wiener_filter_constrained_noncausal(self):
         h = [1, 0, 1]
-        x = np.random.normal(size=2 ** 16)
+        x = np.random.normal(size=2**16)
         y = olafilt(h, x)
 
         h_est = -np.real(
@@ -534,14 +532,14 @@ class TestFastBlockLMSFilter:
         filt = FastBlockLMSFilter(length, blocklength, stepsize=1)
 
         for x, yd in zip(
-            xs.reshape(blocks, blocklength),
-            y_desired.reshape(blocks, blocklength)
+            xs.reshape(blocks, blocklength), y_desired.reshape(blocks, blocklength)
         ):
             y = filt.filt(x)
             e = yd - y
             filt.adapt(x, e)
 
         npt.assert_almost_equal(w, filt.w)
+
 
 class TestMultiChannelBlockLMS:
     def test_single_same_as_multi_filt(self):
@@ -626,7 +624,7 @@ class TestMultiChannelBlockLMS:
 
     def test_filt(self):
         """MultiChannelBlockLMS.filt behaves like lfilter or olafilt."""
-        for (M, K) in [(M, K) for M in range(1, 4) for K in range(1, 4)]:
+        for M, K in [(M, K) for M in range(1, 4) for K in range(1, 4)]:
             length = 16
             blocks = 16
             blocklength = 16

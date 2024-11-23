@@ -1,11 +1,11 @@
 """A filtered-reference Least-Mean-Square (FxLMS) filter."""
 
-import numpy as np
 import matplotlib.pyplot as plt
-
+import numpy as np
 from adafilt import FastBlockLMSFilter, FIRFilter, olafilt
 from adafilt.io import FakeInterface
 from adafilt.utils import wgn
+
 
 length = 512  # number of adaptive FIR filter taps
 blocklength = 128  # length of I/O buffer and blocksize of filter

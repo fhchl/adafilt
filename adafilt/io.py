@@ -1,7 +1,9 @@
 """Input and output classes."""
 
 from itertools import cycle
+
 import numpy as np
+
 from adafilt import olafilt
 
 

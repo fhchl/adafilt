@@ -1,0 +1,47 @@
+[project]
+name = "adafilt"
+version = "0.1.0"
+description = "Adaptive filters for 🐍"
+readme = "README.md"
+requires-python =">=3.8"
+license = {file = "LICENSE"}
+authors = [
+  {name = "Franz M. Heuchel", email = "franz.heuchel@gmail.com"},
+]
+keywords = ["signal-processing", "adaptive-filters", "dsp"]
+classifiers = [
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Multimedia :: Sound/Audio",
+]
+urls = {repository = "https://github.com/fhchl/adafilt" }
+dependencies = ["numpy>=1"]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff", "scipy"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["adafilt/*"]
+
+[tool.ruff]
+extend-include = ["*.ipynb"]
+src = []
+
+[tool.ruff.lint]
+fixable = ["I001", "F401"]
+ignore = ["E402", "E721", "E731", "E741", "F722"]
+select = ["E", "F", "I001"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+lines-after-imports = 2
+order-by-type = false
+
+[tool.pyright]
+include = ["adafilt", "tests"]
