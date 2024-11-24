@@ -5,7 +5,7 @@ import numpy as np
 from adafilt import FastBlockLMSFilter, FIRFilter, olafilt
 from adafilt.io import FakeInterface
 from adafilt.utils import wgn
-
+import time
 
 length = 8  # number of adaptive FIR filter taps
 blocklength = 2  # length of I/O buffer and blocksize of filter
@@ -42,11 +42,14 @@ for i in range(n_buffers):
     # filter the reference signal
     fx = plant_model(x)
     # adapt filter
+    start = time.time()
     filt.adapt(fx, e)
     # filter
     y = filt.filt(x)
+    end = time.time()
     # log error
     elog.append(e)
+    print("Elapsed (after compilation) = %s" % (end - start))
 
 plt.plot(np.concatenate(elog), label="e", alpha=0.7)
 plt.xlabel("Sample")

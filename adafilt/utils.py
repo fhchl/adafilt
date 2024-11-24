@@ -123,7 +123,9 @@ def check_lengths(length, blocklength, h_pri, h_sec):
         length > primax - secmax - blocklength
     ), f"{length} > {primax} - {secmax} - {blocklength}"
 
+import numba
 
+@numba.njit
 def fifo_extend(a, b):
     """Right-extend a with b and popleft same number of elements."""
     n = len(b)

@@ -2,6 +2,7 @@
 from abc import ABC, abstractmethod
 
 import numpy as np
+import numba
 
 from adafilt.utils import (
     atleast_2d,
@@ -216,26 +217,23 @@ class Delay:
         return out
 
 
-class AdaptiveFilter(ABC):
+class AdaptiveFilter:
     """Base class for adaptive filters."""
 
     blocklength: int
     length: int
-    w: np.ndarray
 
     def reset(self):
         """Reset filter object."""
         raise NotImplementedError
 
-    @abstractmethod
     def filt(self, x):
         """Filter a block."""
 
-    @abstractmethod
     def adapt(self, x, e):
         """Adapt to a block."""
 
-    def __call__(self, x, d, sec_path_coeff=None, sec_path_est=None):
+    def run(self, x, d, sec_path_coeff=None, sec_path_est=None):
         """Compute filter output, error, and coefficients.
 
         Parameters
@@ -397,9 +395,26 @@ class LMSFilter(AdaptiveFilter):
         self.w = self.leakage * self.w + stepsize * xvec * np.conj(e)
 
 
+@numba.experimental.jitclass(
+    [
+        ("W", numba.complex128[:]),
+        ("_xfiltbuff", numba.float64[:]),
+        ("_ebuff", numba.float64[:]),
+        ("_xbuff", numba.float64[:]),
+    ]
+)
 class FastBlockLMSFilter(AdaptiveFilter):
     """A fast, block-wise LMS adaptive filter based on overlap-save sectioning."""
 
+    blocklength: int
+    stepsize: float
+    power_averaging: float
+    constrained: bool
+    normalized: bool
+    epsilon_power: float
+    leakage: float
+    _P: float
+    
     def __init__(
         self,
         length=32,
@@ -475,16 +490,16 @@ class FastBlockLMSFilter(AdaptiveFilter):
             assert len(initial_coeff) == length
             self.W[:] = np.fft.rfft(initial_coeff, n=2 * length)
 
-    @property
-    def w(self):
-        w = np.fft.irfft(self.W)
-        if self.constrained:
-            w = w[: self.length]
-        return w
+    # @property
+    # def w(self):
+    #     w = np.fft.irfft(self.W)
+    #     if self.constrained:
+    #         w = w[: self.length]
+    #     return w
 
     def reset(self):
         self._P = 0
-        self.W = np.zeros(self.length + 1, dtype=complex)
+        self.W = np.zeros(self.length + 1, dtype=np.complex128)
         self._xfiltbuff = np.zeros(2 * self.length)
         self._xbuff = np.zeros(2 * self.length)
         self._ebuff = np.zeros(self.length)
